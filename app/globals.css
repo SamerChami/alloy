@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+
+html[lang="ar"] {
+  --font-sans: "Cairo", "Segoe UI", system-ui, sans-serif;
+}
+
+body {
+  background-color: theme("colors.mist");
+  color: theme("colors.ink");
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Logical spacing helpers so RTL/LTR both work without per-side overrides */
+.card {
+  @apply bg-paper border border-line rounded-xl;
+}
+.btn-primary {
+  @apply bg-ink text-mist px-4 py-2 rounded-lg font-medium transition hover:bg-slate disabled:opacity-50;
+}
+.btn-ghost {
+  @apply px-3 py-2 rounded-lg text-slate hover:bg-mist transition;
+}
+.input {
+  @apply w-full bg-paper border border-line rounded-lg px-3 py-2 outline-none focus:border-brass focus:ring-1 focus:ring-brass;
+}
+:focus-visible {
+  outline: 2px solid theme("colors.brass");
+  outline-offset: 2px;
+}
