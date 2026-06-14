@@ -108,37 +108,77 @@ function insertTransform(ins: IInsertEntity): Transform {
 
 type CollectResult = { vertices: Pt3[]; holes: HoleInfo[] };
 
-function collectBlock(
+// Strict 2-level traversal for a panel block:
+//   Level 0 (panel block)  → collect CIRCLEs (drill holes) only
+//   Level 1 (face sub-blocks reached via INSERTs) → collect 3DFACEs only
+//
+// Polyboard exports panel geometry as world-coordinate 3DFACEs inside
+// face sub-blocks, but the panel block itself may also carry local-
+// coordinate 3DFACEs as metadata.  Mixing both causes extents that are
+// ~2× the real size.  The fix: ignore any 3DFACEs at the panel-block
+// level and collect geometry only from exactly one INSERT level down.
+function collectPanel(
   blocks: Record<string, IBlock>,
-  blockName: string,
+  panelBlockName: string,
   t: Transform,
-  depth: number,
-  out: CollectResult,
   warnings: string[],
-): void {
-  if (depth > 6) return;
-  const block = blocks[blockName];
-  if (!block) {
-    if (depth < 3) warnings.push(`Block '${blockName}' not found`);
-    return;
+): CollectResult {
+  const out: CollectResult = { vertices: [], holes: [] };
+  const panelBlock = blocks[panelBlockName];
+  if (!panelBlock) {
+    warnings.push(`Panel block '${panelBlockName}' not found`);
+    return out;
   }
-  for (const ent of block.entities ?? []) {
+
+  // Level 0: CIRCLEs only (drill-hole positions in world space)
+  for (const ent of panelBlock.entities ?? []) {
     const e = ent as IEntity;
-    if (e.type === "3DFACE") {
-      const face = e as I3DfaceEntity;
-      for (const v of face.vertices ?? []) {
-        out.vertices.push(applyT(v, t));
-      }
-    } else if (e.type === "CIRCLE") {
+    if (e.type === "CIRCLE") {
       const circle = e as ICircleEntity;
       const center = applyT(circle.center, t);
       out.holes.push({ ...center, dia: (circle.radius ?? 0) * 2 });
-    } else if (e.type === "INSERT") {
-      const ins = e as IInsertEntity;
-      const childT = composeT(t, insertTransform(ins));
-      collectBlock(blocks, ins.name, childT, depth + 1, out, warnings);
     }
   }
+
+  // Level 1: follow each INSERT one layer, collect 3DFACEs (world coords)
+  let foundFaces = false;
+  for (const ent of panelBlock.entities ?? []) {
+    const e = ent as IEntity;
+    if (e.type !== "INSERT") continue;
+    const ins = e as IInsertEntity;
+    const faceBlock = blocks[ins.name];
+    if (!faceBlock) continue;
+    const childT = composeT(t, insertTransform(ins));
+    for (const fe of faceBlock.entities ?? []) {
+      const faceEnt = fe as IEntity;
+      if (faceEnt.type === "3DFACE") {
+        const face = faceEnt as I3DfaceEntity;
+        for (const v of face.vertices ?? []) {
+          out.vertices.push(applyT(v, childT));
+        }
+        foundFaces = true;
+      } else if (faceEnt.type === "CIRCLE") {
+        const circle = faceEnt as ICircleEntity;
+        const center = applyT(circle.center, childT);
+        out.holes.push({ ...center, dia: (circle.radius ?? 0) * 2 });
+      }
+    }
+  }
+
+  // Fallback: if no face sub-blocks found, use 3DFACEs directly in panel block
+  if (!foundFaces) {
+    for (const ent of panelBlock.entities ?? []) {
+      const e = ent as IEntity;
+      if (e.type === "3DFACE") {
+        const face = e as I3DfaceEntity;
+        for (const v of face.vertices ?? []) {
+          out.vertices.push(applyT(v, t));
+        }
+      }
+    }
+  }
+
+  return out;
 }
 
 // ── bbox ──────────────────────────────────────────────────────────────
@@ -232,8 +272,7 @@ function extractCabinet(dxf: IDxf): ParseResult {
     }
 
     const t = composeT(IDENTITY, insertTransform(ins));
-    const collected: CollectResult = { vertices: [], holes: [] };
-    collectBlock(blocks, panelBlockName, t, 0, collected, warnings);
+    const collected = collectPanel(blocks, panelBlockName, t, warnings);
 
     if (collected.vertices.length === 0) {
       warnings.push(`No 3D faces in '${panelBlockName}' — skipped.`);
@@ -287,6 +326,12 @@ function extractCabinet(dxf: IDxf): ParseResult {
 
   // Sort dims so largest = height
   const [dSmall, dMid, dLarge] = [cabinetW, cabinetH, cabinetD].sort((a, b) => a - b);
+
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      `[polyboardImport] ${cabinetBlockName}: W=${dMid} H=${dLarge} D=${dSmall} (${panels.length} panels)`,
+    );
+  }
 
   return {
     cabinet: {
