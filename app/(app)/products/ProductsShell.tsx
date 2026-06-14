@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Plus, Pencil, ExternalLink } from "lucide-react";
+import { Search, Plus, Pencil, ExternalLink, FileUp } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { PageTitle } from "@/components/ui/blocks";
 import { jod } from "@/lib/utils";
@@ -205,13 +205,22 @@ export function ProductsShell({
           />
         </div>
         {isOffice && (
-          <button
-            className="btn-primary flex items-center gap-2"
-            onClick={openAdd}
-          >
-            <Plus size={16} />
-            {t("addProduct")}
-          </button>
+          <>
+            <button
+              className="btn-ghost flex items-center gap-2"
+              onClick={() => router.push("/products/import")}
+            >
+              <FileUp size={16} />
+              {t("importDxf")}
+            </button>
+            <button
+              className="btn-primary flex items-center gap-2"
+              onClick={openAdd}
+            >
+              <Plus size={16} />
+              {t("addProduct")}
+            </button>
+          </>
         )}
       </div>
 
