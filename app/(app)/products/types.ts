@@ -13,4 +13,12 @@ export type Product = {
   description: string | null;
   drive_url: string | null;
   is_active: boolean;
+  // BOM pricing fields (added by db/05_bom.sql)
+  labor_jod?: number;
+  margin_pct?: number;
+  price_overridden?: boolean;
+  is_template?: boolean;
+  materials_cost_jod?: number;
+  components_cost_jod?: number;
+  base_cost_jod?: number;
 };

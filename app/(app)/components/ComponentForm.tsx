@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { X } from "lucide-react";
 import { createClient } from "@/lib/supabase-browser";
 import { useLang } from "@/components/lang-provider";
+import { jod } from "@/lib/utils";
 import { componentSubcategories } from "@/lib/catalog";
+import { panelPricePerM2 } from "@/lib/pricing";
 import type { TKey } from "@/lib/i18n";
 import type { Component } from "./types";
 
@@ -27,6 +29,9 @@ type FormState = {
   description: string;
   drive_url: string;
   is_active: boolean;
+  sheet_length_mm: string;
+  sheet_width_mm: string;
+  sheet_price_jod: string;
 };
 
 function fromComponent(c: Component | null): FormState {
@@ -47,6 +52,9 @@ function fromComponent(c: Component | null): FormState {
     description: c?.description ?? "",
     drive_url: c?.drive_url ?? "",
     is_active: c?.is_active ?? true,
+    sheet_length_mm: c?.sheet_length_mm != null ? String(c.sheet_length_mm) : "",
+    sheet_width_mm: c?.sheet_width_mm != null ? String(c.sheet_width_mm) : "",
+    sheet_price_jod: c?.sheet_price_jod != null ? String(c.sheet_price_jod) : "",
   };
 }
 
@@ -66,6 +74,17 @@ export function ComponentForm({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  const isMaterial = form.subcategory === "Materials";
+
+  const derivedPricePerM2 = useMemo(() => {
+    if (!isMaterial) return null;
+    const l = parseFloat(form.sheet_length_mm);
+    const w = parseFloat(form.sheet_width_mm);
+    const p = parseFloat(form.sheet_price_jod);
+    if (!l || !w || !p) return null;
+    return panelPricePerM2(l, w, p);
+  }, [isMaterial, form.sheet_length_mm, form.sheet_width_mm, form.sheet_price_jod]);
+
   function set(key: keyof FormState) {
     return (
       e: React.ChangeEvent<
@@ -80,7 +99,7 @@ export function ComponentForm({
     setError(null);
 
     const supabase = createClient();
-    const payload = {
+    const payload: Record<string, unknown> = {
       sku: form.sku.trim() || null,
       name_en: form.name_en.trim(),
       name_ar: form.name_ar.trim() || null,
@@ -97,6 +116,9 @@ export function ComponentForm({
       description: form.description.trim() || null,
       drive_url: form.drive_url.trim() || null,
       is_active: form.is_active,
+      sheet_length_mm: isMaterial && form.sheet_length_mm !== "" ? parseFloat(form.sheet_length_mm) : null,
+      sheet_width_mm: isMaterial && form.sheet_width_mm !== "" ? parseFloat(form.sheet_width_mm) : null,
+      sheet_price_jod: isMaterial && form.sheet_price_jod !== "" ? parseFloat(form.sheet_price_jod) : null,
     };
 
     if (component?.id) {
@@ -219,6 +241,46 @@ export function ComponentForm({
               />
             </div>
           </div>
+
+          {/* Sheet / panel fields — only when subcategory = Materials */}
+          {isMaterial && (
+            <div className="border border-line rounded-lg p-4 space-y-3">
+              <div className="text-xs font-semibold text-slate uppercase tracking-wider">
+                {t("panelMaterial")}
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">{t("sheetLength")}</label>
+                  <input
+                    className="input" type="number" min="0" step="0.01" dir="ltr"
+                    placeholder="2440"
+                    value={form.sheet_length_mm} onChange={set("sheet_length_mm")}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">{t("sheetWidth")}</label>
+                  <input
+                    className="input" type="number" min="0" step="0.01" dir="ltr"
+                    placeholder="1220"
+                    value={form.sheet_width_mm} onChange={set("sheet_width_mm")}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">{t("sheetPrice")}</label>
+                  <input
+                    className="input" type="number" min="0" step="0.001" dir="ltr"
+                    value={form.sheet_price_jod} onChange={set("sheet_price_jod")}
+                  />
+                </div>
+              </div>
+              {derivedPricePerM2 != null && (
+                <div className="text-sm">
+                  <span className="text-slate">{t("pricePerM2")}: </span>
+                  <span className="font-semibold" dir="ltr">{jod(derivedPricePerM2)}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Stock */}
           <div className="border border-line rounded-lg p-4 space-y-3">

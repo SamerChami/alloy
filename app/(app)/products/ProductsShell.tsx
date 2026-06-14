@@ -10,6 +10,7 @@ import { productSubcategories, type SubcategoryConfig } from "@/lib/catalog";
 import type { TKey } from "@/lib/i18n";
 import { ProductForm } from "./ProductForm";
 import type { Product } from "./types";
+import type { PanelOption, ComponentOption, BandingType } from "./bom_types";
 
 const OTHER: SubcategoryConfig = { value: "Other", en: "Other", ar: "أخرى" };
 const ALL_GROUPS = [...productSubcategories, OTHER];
@@ -121,9 +122,15 @@ function ProductTable({
 export function ProductsShell({
   initialProducts,
   isOffice,
+  panels,
+  allComponents,
+  bandingTypes,
 }: {
   initialProducts: Product[];
   isOffice: boolean;
+  panels: PanelOption[];
+  allComponents: ComponentOption[];
+  bandingTypes: BandingType[];
 }) {
   const { t, lang } = useLang();
   const router = useRouter();
@@ -132,12 +139,14 @@ export function ProductsShell({
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Product | null>(null);
 
-  const subLabel = (sub: SubcategoryConfig) => lang === "ar" ? sub.ar : sub.en;
+  const subLabel = (sub: SubcategoryConfig) =>
+    lang === "ar" ? sub.ar : sub.en;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = initialProducts;
-    if (subcategoryFilter) list = list.filter((p) => p.subcategory === subcategoryFilter);
+    if (subcategoryFilter)
+      list = list.filter((p) => p.subcategory === subcategoryFilter);
     if (q) {
       list = list.filter(
         (p) =>
@@ -155,9 +164,9 @@ export function ProductsShell({
     if (isFiltering) return null;
     const map = new Map<string, Product[]>();
     for (const sub of ALL_GROUPS) map.set(sub.value, []);
-    const knownValues = new Set(productSubcategories.map((s) => s.value));
+    const known = new Set(productSubcategories.map((s) => s.value));
     for (const p of filtered) {
-      const key = knownValues.has(p.subcategory ?? "") ? p.subcategory! : "Other";
+      const key = known.has(p.subcategory ?? "") ? p.subcategory! : "Other";
       map.get(key)?.push(p);
     }
     return map;
@@ -182,7 +191,6 @@ export function ProductsShell({
     <div>
       <PageTitle titleKey="products" />
 
-      {/* Toolbar */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search
@@ -207,7 +215,6 @@ export function ProductsShell({
         )}
       </div>
 
-      {/* Subcategory filter pills */}
       <div className="flex flex-wrap gap-2 mb-6">
         <button
           className={`px-3 py-1 rounded-full text-sm border transition-colors ${
@@ -257,7 +264,11 @@ export function ProductsShell({
                 <h3 className="text-xs font-semibold text-slate uppercase tracking-wider mb-3">
                   {subLabel(sub)}
                 </h3>
-                <ProductTable products={items} isOffice={isOffice} onEdit={openEdit} />
+                <ProductTable
+                  products={items}
+                  isOffice={isOffice}
+                  onEdit={openEdit}
+                />
               </div>
             );
           })}
@@ -269,6 +280,9 @@ export function ProductsShell({
       {formOpen && (
         <ProductForm
           product={editTarget}
+          panels={panels}
+          allComponents={allComponents}
+          bandingTypes={bandingTypes}
           onClose={() => setFormOpen(false)}
           onSaved={handleSaved}
         />

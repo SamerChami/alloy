@@ -16,4 +16,8 @@ export type Component = {
   description: string | null;
   drive_url: string | null;
   is_active: boolean;
+  // Panel/sheet columns (added by db/05_bom.sql, only for Materials subcategory)
+  sheet_length_mm?: number | null;
+  sheet_width_mm?: number | null;
+  sheet_price_jod?: number | null;
 };
