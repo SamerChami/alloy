@@ -6,58 +6,66 @@ import { Search, Plus, Pencil, ExternalLink } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { PageTitle } from "@/components/ui/blocks";
 import { jod } from "@/lib/utils";
-import { productSubcategories, type SubcategoryConfig } from "@/lib/catalog";
+import { componentSubcategories, type SubcategoryConfig } from "@/lib/catalog";
 import type { TKey } from "@/lib/i18n";
-import { ProductForm } from "./ProductForm";
-import type { Product } from "./types";
+import { ComponentForm } from "./ComponentForm";
+import type { Component } from "./types";
 
 const OTHER: SubcategoryConfig = { value: "Other", en: "Other", ar: "أخرى" };
-const ALL_GROUPS = [...productSubcategories, OTHER];
+const ALL_GROUPS = [...componentSubcategories, OTHER];
 
-function dims(p: Product): string | null {
-  if (!p.width_mm && !p.height_mm && !p.depth_mm) return null;
-  return (
-    [p.width_mm, p.height_mm, p.depth_mm].map((v) => v ?? "—").join("×") + " mm"
-  );
-}
-
-function ProductRow({
-  p,
+function ComponentRow({
+  c,
   isOffice,
   onEdit,
 }: {
-  p: Product;
+  c: Component;
   isOffice: boolean;
-  onEdit: (p: Product) => void;
+  onEdit: (c: Component) => void;
 }) {
   const { t } = useLang();
-  const d = dims(p);
+  const isLow = c.track_stock && c.stock_qty <= c.reorder_level;
+
   return (
     <tr className="border-b border-line last:border-0 hover:bg-mist/50 transition-colors">
       <td className="px-4 py-3">
-        <div className="font-medium">{p.name_en}</div>
-        {p.name_ar && (
+        <div className="font-medium">{c.name_en}</div>
+        {c.name_ar && (
           <div className="text-slate text-xs" dir="rtl">
-            {p.name_ar}
+            {c.name_ar}
           </div>
         )}
       </td>
       <td className="px-4 py-3 text-slate tabular-nums text-sm" dir="ltr">
-        {p.sku ?? "—"}
+        {c.sku ?? "—"}
       </td>
       <td className="px-4 py-3 text-slate text-sm">
-        {t((`unit_${p.unit}`) as TKey)}
+        {t((`unit_${c.unit}`) as TKey)}
       </td>
       <td className="px-4 py-3 tabular-nums font-medium text-sm" dir="ltr">
-        {jod(p.unit_price_jod)}
+        {jod(c.unit_price_jod)}
       </td>
-      <td className="px-4 py-3 text-slate text-sm tabular-nums" dir="ltr">
-        {d ?? "—"}
+      <td className="px-4 py-3 text-sm">
+        {c.track_stock ? (
+          <span className="flex items-center gap-2 flex-wrap">
+            <span className="tabular-nums" dir="ltr">{c.stock_qty}</span>
+            {isLow && (
+              <span className="bg-rust/10 text-rust text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
+                {t("lowStockBadge")}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="text-slate">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-slate tabular-nums text-sm" dir="ltr">
+        {c.track_stock ? c.reorder_level : "—"}
       </td>
       <td className="px-4 py-3">
-        {p.drive_url && (
+        {c.drive_url && (
           <a
-            href={p.drive_url}
+            href={c.drive_url}
             target="_blank"
             rel="noreferrer"
             className="btn-ghost p-2 inline-flex"
@@ -71,8 +79,8 @@ function ProductRow({
         <td className="px-4 py-3">
           <button
             className="btn-ghost p-2"
-            onClick={() => onEdit(p)}
-            aria-label={t("editProduct")}
+            onClick={() => onEdit(c)}
+            aria-label={t("editComponent")}
           >
             <Pencil size={15} />
           </button>
@@ -82,14 +90,14 @@ function ProductRow({
   );
 }
 
-function ProductTable({
-  products,
+function ComponentTable({
+  components,
   isOffice,
   onEdit,
 }: {
-  products: Product[];
+  components: Component[];
   isOffice: boolean;
-  onEdit: (p: Product) => void;
+  onEdit: (c: Component) => void;
 }) {
   const { t } = useLang();
   return (
@@ -102,14 +110,15 @@ function ProductTable({
               <th className="text-start px-4 py-3 font-medium">{t("sku")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("unit")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("unitPrice")}</th>
-              <th className="text-start px-4 py-3 font-medium">{t("dimensions")}</th>
+              <th className="text-start px-4 py-3 font-medium">{t("inStock")}</th>
+              <th className="text-start px-4 py-3 font-medium">{t("reorderLevel")}</th>
               <th className="px-4 py-3" />
               {isOffice && <th className="px-4 py-3" />}
             </tr>
           </thead>
           <tbody>
-            {products.map((p) => (
-              <ProductRow key={p.id} p={p} isOffice={isOffice} onEdit={onEdit} />
+            {components.map((c) => (
+              <ComponentRow key={c.id} c={c} isOffice={isOffice} onEdit={onEdit} />
             ))}
           </tbody>
         </table>
@@ -118,11 +127,11 @@ function ProductTable({
   );
 }
 
-export function ProductsShell({
-  initialProducts,
+export function ComponentsShell({
+  initialComponents,
   isOffice,
 }: {
-  initialProducts: Product[];
+  initialComponents: Component[];
   isOffice: boolean;
 }) {
   const { t, lang } = useLang();
@@ -130,35 +139,35 @@ export function ProductsShell({
   const [search, setSearch] = useState("");
   const [subcategoryFilter, setSubcategoryFilter] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<Product | null>(null);
+  const [editTarget, setEditTarget] = useState<Component | null>(null);
 
   const subLabel = (sub: SubcategoryConfig) => lang === "ar" ? sub.ar : sub.en;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let list = initialProducts;
-    if (subcategoryFilter) list = list.filter((p) => p.subcategory === subcategoryFilter);
+    let list = initialComponents;
+    if (subcategoryFilter) list = list.filter((c) => c.subcategory === subcategoryFilter);
     if (q) {
       list = list.filter(
-        (p) =>
-          p.name_en.toLowerCase().includes(q) ||
-          (p.name_ar ?? "").toLowerCase().includes(q) ||
-          (p.sku ?? "").toLowerCase().includes(q)
+        (c) =>
+          c.name_en.toLowerCase().includes(q) ||
+          (c.name_ar ?? "").toLowerCase().includes(q) ||
+          (c.sku ?? "").toLowerCase().includes(q)
       );
     }
     return list;
-  }, [initialProducts, search, subcategoryFilter]);
+  }, [initialComponents, search, subcategoryFilter]);
 
   const isFiltering = search.trim() !== "" || subcategoryFilter !== null;
 
   const grouped = useMemo(() => {
     if (isFiltering) return null;
-    const map = new Map<string, Product[]>();
+    const map = new Map<string, Component[]>();
     for (const sub of ALL_GROUPS) map.set(sub.value, []);
-    const knownValues = new Set(productSubcategories.map((s) => s.value));
-    for (const p of filtered) {
-      const key = knownValues.has(p.subcategory ?? "") ? p.subcategory! : "Other";
-      map.get(key)?.push(p);
+    const knownValues = new Set(componentSubcategories.map((s) => s.value));
+    for (const c of filtered) {
+      const key = knownValues.has(c.subcategory ?? "") ? c.subcategory! : "Other";
+      map.get(key)?.push(c);
     }
     return map;
   }, [filtered, isFiltering]);
@@ -168,8 +177,8 @@ export function ProductsShell({
     setFormOpen(true);
   }
 
-  function openEdit(p: Product) {
-    setEditTarget(p);
+  function openEdit(c: Component) {
+    setEditTarget(c);
     setFormOpen(true);
   }
 
@@ -180,7 +189,7 @@ export function ProductsShell({
 
   return (
     <div>
-      <PageTitle titleKey="products" />
+      <PageTitle titleKey="components" />
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
@@ -202,7 +211,7 @@ export function ProductsShell({
             onClick={openAdd}
           >
             <Plus size={16} />
-            {t("addProduct")}
+            {t("addComponent")}
           </button>
         )}
       </div>
@@ -219,7 +228,7 @@ export function ProductsShell({
         >
           {t("all")}
         </button>
-        {productSubcategories.map((sub) => (
+        {componentSubcategories.map((sub) => (
           <button
             key={sub.value}
             className={`px-3 py-1 rounded-full text-sm border transition-colors ${
@@ -236,14 +245,14 @@ export function ProductsShell({
 
       {filtered.length === 0 ? (
         <div className="card p-12 text-center text-slate">
-          <p>{t("noProducts")}</p>
+          <p>{t("noComponents")}</p>
           {isOffice && (
             <button
               className="btn-primary mt-4 mx-auto flex items-center gap-2"
               onClick={openAdd}
             >
               <Plus size={16} />
-              {t("addProduct")}
+              {t("addComponent")}
             </button>
           )}
         </div>
@@ -257,18 +266,18 @@ export function ProductsShell({
                 <h3 className="text-xs font-semibold text-slate uppercase tracking-wider mb-3">
                   {subLabel(sub)}
                 </h3>
-                <ProductTable products={items} isOffice={isOffice} onEdit={openEdit} />
+                <ComponentTable components={items} isOffice={isOffice} onEdit={openEdit} />
               </div>
             );
           })}
         </div>
       ) : (
-        <ProductTable products={filtered} isOffice={isOffice} onEdit={openEdit} />
+        <ComponentTable components={filtered} isOffice={isOffice} onEdit={openEdit} />
       )}
 
       {formOpen && (
-        <ProductForm
-          product={editTarget}
+        <ComponentForm
+          component={editTarget}
           onClose={() => setFormOpen(false)}
           onSaved={handleSaved}
         />

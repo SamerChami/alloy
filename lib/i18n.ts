@@ -119,6 +119,17 @@ export const dict = {
     unit_kg: "kg",
     unit_roll: "roll",
     unit_other: "other",
+    // components module
+    components: "Components",
+    subcategory: "Subcategory",
+    addComponent: "Add component",
+    editComponent: "Edit component",
+    noComponents: "No components yet",
+    trackStock: "Track stock",
+    inStock: "In stock",
+    reorderLevel: "Reorder level",
+    lowStockBadge: "Low stock",
+    cantDeleteComponent: "Can't delete: this component is used in quotations — deactivate it instead.",
   },
   ar: {
     appName: "ALLOY",
@@ -234,6 +245,17 @@ export const dict = {
     unit_kg: "كغ",
     unit_roll: "لفة",
     unit_other: "أخرى",
+    // components module
+    components: "المكوّنات",
+    subcategory: "الفئة الفرعية",
+    addComponent: "إضافة مكوّن",
+    editComponent: "تعديل المكوّن",
+    noComponents: "لا توجد مكوّنات بعد",
+    trackStock: "تتبع المخزون",
+    inStock: "في المخزون",
+    reorderLevel: "مستوى إعادة الطلب",
+    lowStockBadge: "مخزون منخفض",
+    cantDeleteComponent: "لا يمكن الحذف: هذا المكوّن مستخدم في عروض أسعار — قم بإلغاء تفعيله عوضاً عن ذلك.",
   },
 } as const;
 

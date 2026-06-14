@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Users,
   Package,
+  Layers,
   Truck,
   FileText,
   Receipt,
@@ -40,7 +41,8 @@ export type NavItem = {
 export const NAV: NavItem[] = [
   { href: "/dashboard",  key: "dashboard",  icon: LayoutDashboard, roles: ["admin","sales_manager","design_manager","production_manager","analyzing_manager","factory_worker","installation"] },
   { href: "/clients",    key: "clients",    icon: Users,           roles: OFFICE },
-  { href: "/products",   key: "products",   icon: Package,         roles: ["admin","sales_manager","design_manager","production_manager","analyzing_manager","factory_worker","installation"] },
+  { href: "/products",    key: "products",    icon: Package,  roles: ["admin","sales_manager","design_manager","production_manager","analyzing_manager","factory_worker","installation"] },
+  { href: "/components",  key: "components",  icon: Layers,   roles: ["admin","sales_manager","design_manager","production_manager","analyzing_manager","factory_worker"] },
   { href: "/quotations", key: "quotations", icon: FileText,        roles: OFFICE },
   { href: "/contracts",  key: "contracts",  icon: FileSignature,   roles: OFFICE },
   { href: "/invoices",   key: "invoices",   icon: Receipt,         roles: OFFICE },

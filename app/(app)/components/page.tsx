@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase-server";
-import { ProductsShell } from "./ProductsShell";
-import type { Product } from "./types";
+import { ComponentsShell } from "./ComponentsShell";
+import type { Component } from "./types";
 
 const OFFICE_ROLES = [
   "admin",
@@ -10,20 +10,20 @@ const OFFICE_ROLES = [
   "analyzing_manager",
 ];
 
-export default async function ProductsPage() {
+export default async function ComponentsPage() {
   const supabase = await createClient();
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: products }, { data: profile }] = await Promise.all([
+  const [{ data: components }, { data: profile }] = await Promise.all([
     supabase
       .from("products")
       .select(
-        "id, sku, name_en, name_ar, subcategory, unit, unit_price_jod, cost_jod, width_mm, height_mm, depth_mm, description, drive_url, is_active"
+        "id, sku, name_en, name_ar, subcategory, unit, unit_price_jod, cost_jod, track_stock, stock_qty, reorder_level, width_mm, height_mm, depth_mm, description, drive_url, is_active"
       )
-      .eq("item_kind", "product")
+      .eq("item_kind", "component")
       .eq("is_active", true)
       .order("subcategory")
       .order("name_en"),
@@ -37,8 +37,8 @@ export default async function ProductsPage() {
   const isOffice = OFFICE_ROLES.includes(profile?.role ?? "");
 
   return (
-    <ProductsShell
-      initialProducts={(products ?? []) as Product[]}
+    <ComponentsShell
+      initialComponents={(components ?? []) as Component[]}
       isOffice={isOffice}
     />
   );
