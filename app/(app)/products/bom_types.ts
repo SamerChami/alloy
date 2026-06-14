@@ -36,4 +36,8 @@ export type BomLineState = {
   banded_length_m: string;
   component_id: string;
   qty: string;
+  // 3D preview fields
+  part_role: string;
+  depth_mm: string;
+  pos_offset_mm: string;
 };

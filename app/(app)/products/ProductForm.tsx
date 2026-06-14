@@ -13,9 +13,15 @@ import {
   rollup,
 } from "@/lib/pricing";
 import type { TKey } from "@/lib/i18n";
+import dynamic from "next/dynamic";
 import { BomSection, newBomKey, emptyPanelLine, emptyComponentLine } from "./BomSection";
 import type { BomLineState, PanelOption, ComponentOption, BandingType } from "./bom_types";
 import type { Product } from "./types";
+
+const Cabinet3D = dynamic(
+  () => import("@/components/Cabinet3D").then(m => ({ default: m.Cabinet3D })),
+  { ssr: false, loading: () => <div className="h-[400px] border border-line rounded-lg" /> },
+);
 
 const UNITS = ["pcs", "sheet", "m", "m2", "set", "kg", "roll", "other"] as const;
 
@@ -74,6 +80,9 @@ function dbLineToBomState(row: Record<string, unknown>): BomLineState {
     banded_length_m: row.banded_length_m != null ? String(row.banded_length_m) : "0",
     component_id: (row.component_id as string | null) ?? "",
     qty: row.qty != null ? String(row.qty) : "1",
+    part_role: (row.part_role as string | null) ?? "",
+    depth_mm: row.depth_mm != null ? String(row.depth_mm) : "",
+    pos_offset_mm: row.pos_offset_mm != null ? String(row.pos_offset_mm) : "",
   };
 }
 
@@ -90,6 +99,9 @@ function bomStateToInsert(line: BomLineState, productId: string, idx: number) {
     component_id: line.component_id || null,
     qty: parseFloat(line.qty) || 1,
     sort_order: idx,
+    part_role: line.part_role || null,
+    depth_mm: line.depth_mm !== "" ? parseFloat(line.depth_mm) : null,
+    pos_offset_mm: line.pos_offset_mm !== "" ? parseFloat(line.pos_offset_mm) : null,
   };
 }
 
@@ -384,6 +396,16 @@ export function ProductForm({
               panels={panels}
               allComponents={allComponents}
               bandingTypes={bandingTypes}
+            />
+          )}
+
+          {/* ── 3D preview ── */}
+          {bomLines.some(l => l.line_type === "panel") && (
+            <Cabinet3D
+              cabinetWidth={parseFloat(form.width_mm)  || 0}
+              cabinetHeight={parseFloat(form.height_mm) || 0}
+              cabinetDepth={parseFloat(form.depth_mm)  || 0}
+              parts={bomLines}
             />
           )}
 

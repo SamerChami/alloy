@@ -8,12 +8,14 @@ import {
   panelPartCost,
   componentPartCost,
 } from "@/lib/pricing";
+import { PART_ROLES } from "@/lib/cabinet3d";
 import type {
   BomLineState,
   PanelOption,
   ComponentOption,
   BandingType,
 } from "./bom_types";
+import type { TKey } from "@/lib/i18n";
 
 let _keyCounter = 0;
 export function newBomKey(): string {
@@ -32,6 +34,9 @@ export function emptyPanelLine(): BomLineState {
     banded_length_m: "0",
     component_id: "",
     qty: "1",
+    part_role: "",
+    depth_mm: "",
+    pos_offset_mm: "",
   };
 }
 
@@ -47,6 +52,9 @@ export function emptyComponentLine(): BomLineState {
     banded_length_m: "0",
     component_id: "",
     qty: "1",
+    part_role: "",
+    depth_mm: "",
+    pos_offset_mm: "",
   };
 }
 
@@ -260,6 +268,62 @@ export function BomSection({
                       >
                         <X size={14} />
                       </button>
+                    </div>
+                    {/* Row 1b: role, depth, offset (3D preview fields) */}
+                    <div className="flex flex-wrap gap-2 items-end">
+                      <div className="flex-1 min-w-[140px]">
+                        <label className="block text-xs text-slate mb-0.5">
+                          {t("roleLabel")}
+                        </label>
+                        <select
+                          className="input text-sm"
+                          value={line.part_role}
+                          onChange={(e) =>
+                            update(line._key, { part_role: e.target.value })
+                          }
+                        >
+                          <option value="">{t("noneOption")}</option>
+                          {PART_ROLES.map((r) => (
+                            <option key={r} value={r}>
+                              {t((`partRole_${r}`) as TKey)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="w-24">
+                        <label className="block text-xs text-slate mb-0.5">
+                          {t("depth")}
+                        </label>
+                        <input
+                          className="input text-sm"
+                          type="number"
+                          min="0"
+                          step="1"
+                          dir="ltr"
+                          placeholder="—"
+                          value={line.depth_mm}
+                          onChange={(e) =>
+                            update(line._key, { depth_mm: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="w-24">
+                        <label className="block text-xs text-slate mb-0.5">
+                          {t("offsetMm")}
+                        </label>
+                        <input
+                          className="input text-sm"
+                          type="number"
+                          min="0"
+                          step="1"
+                          dir="ltr"
+                          placeholder="—"
+                          value={line.pos_offset_mm}
+                          onChange={(e) =>
+                            update(line._key, { pos_offset_mm: e.target.value })
+                          }
+                        />
+                      </div>
                     </div>
                     {/* Row 2: banding + cost */}
                     <div className="flex flex-wrap gap-2 items-end">
