@@ -264,8 +264,14 @@ function extractCabinet(dxf: IDxf): ParseResult {
   }
 
   const cabinetBlock = blocks[cabinetBlockName];
-  const allVertices: Pt3[] = [];
   const panels: ImportedPanel[] = [];
+
+  // Running union of per-panel bboxes — used for the overall cabinet dims.
+  // We derive this from the SAME per-panel boxes the table uses, not from a
+  // separate raw-vertex pool, so the two are guaranteed to agree.
+  let gMinX = Infinity, gMaxX = -Infinity;
+  let gMinY = Infinity, gMaxY = -Infinity;
+  let gMinZ = Infinity, gMaxZ = -Infinity;
 
   for (const ent of cabinetBlock.entities ?? []) {
     if ((ent as IEntity).type !== "INSERT") continue;
@@ -285,9 +291,12 @@ function extractCabinet(dxf: IDxf): ParseResult {
       continue;
     }
 
-    allVertices.push(...collected.vertices);
-
     const bb = bbox(collected.vertices)!;
+
+    // Expand global bbox with this panel's bbox (same source as per-panel table)
+    if (bb.minX < gMinX) gMinX = bb.minX; if (bb.maxX > gMaxX) gMaxX = bb.maxX;
+    if (bb.minY < gMinY) gMinY = bb.minY; if (bb.maxY > gMaxY) gMaxY = bb.maxY;
+    if (bb.minZ < gMinZ) gMinZ = bb.minZ; if (bb.maxZ > gMaxZ) gMaxZ = bb.maxZ;
     const extentX = bb.maxX - bb.minX;
     const extentY = bb.maxY - bb.minY;
     const extentZ = bb.maxZ - bb.minZ;
@@ -324,11 +333,10 @@ function extractCabinet(dxf: IDxf): ParseResult {
     });
   }
 
-  // Overall cabinet bounding box from all geometry
-  const cb = bbox(allVertices);
-  const cabinetW = cb ? r1(cb.maxX - cb.minX) : 0;
-  const cabinetH = cb ? r1(cb.maxY - cb.minY) : 0;
-  const cabinetD = cb ? r1(cb.maxZ - cb.minZ) : 0;
+  // Overall cabinet dims: union of the per-panel bboxes (same source as the table)
+  const cabinetW = gMinX === Infinity ? 0 : r1(gMaxX - gMinX);
+  const cabinetH = gMinY === Infinity ? 0 : r1(gMaxY - gMinY);
+  const cabinetD = gMinZ === Infinity ? 0 : r1(gMaxZ - gMinZ);
 
   // Sort dims so largest = height
   const [dSmall, dMid, dLarge] = [cabinetW, cabinetH, cabinetD].sort((a, b) => a - b);
