@@ -108,15 +108,21 @@ function insertTransform(ins: IInsertEntity): Transform {
 
 type CollectResult = { vertices: Pt3[]; holes: HoleInfo[] };
 
-// Strict 2-level traversal for a panel block:
-//   Level 0 (panel block)  → collect CIRCLEs (drill holes) only
-//   Level 1 (face sub-blocks reached via INSERTs) → collect 3DFACEs only
+// Collect geometry for one panel block.
 //
-// Polyboard exports panel geometry as world-coordinate 3DFACEs inside
-// face sub-blocks, but the panel block itself may also carry local-
-// coordinate 3DFACEs as metadata.  Mixing both causes extents that are
-// ~2× the real size.  The fix: ignore any 3DFACEs at the panel-block
-// level and collect geometry only from exactly one INSERT level down.
+// Level 0 (the panel block itself): collect CIRCLEs only.
+//   The panel block may carry 3DFACEs in panel-local coordinates that
+//   conflict with the world-space 3DFACEs in its face sub-blocks, so we
+//   deliberately skip them here.
+//
+// Levels 1–2 (face sub-blocks via INSERTs): collect 3DFACEs + CIRCLEs.
+//   Some Polyboard exports nest faces one INSERT deep; others two deep.
+//   We recurse up to depth 2, which covers both cases without risking
+//   cross-panel contamination.
+//
+// Fallback: if zero vertices were found via sub-blocks, collect 3DFACEs
+//   directly from the panel block (handles flat DXF exports with no
+//   sub-block hierarchy).
 function collectPanel(
   blocks: Record<string, IBlock>,
   panelBlockName: string,
@@ -130,50 +136,50 @@ function collectPanel(
     return out;
   }
 
-  // Level 0: CIRCLEs only (drill-hole positions in world space)
+  // Level 0: CIRCLEs only
   for (const ent of panelBlock.entities ?? []) {
     const e = ent as IEntity;
     if (e.type === "CIRCLE") {
       const circle = e as ICircleEntity;
-      const center = applyT(circle.center, t);
-      out.holes.push({ ...center, dia: (circle.radius ?? 0) * 2 });
+      out.holes.push({ ...applyT(circle.center, t), dia: (circle.radius ?? 0) * 2 });
     }
   }
 
-  // Level 1: follow each INSERT one layer, collect 3DFACEs (world coords)
-  let foundFaces = false;
-  for (const ent of panelBlock.entities ?? []) {
-    const e = ent as IEntity;
-    if (e.type !== "INSERT") continue;
-    const ins = e as IInsertEntity;
-    const faceBlock = blocks[ins.name];
-    if (!faceBlock) continue;
-    const childT = composeT(t, insertTransform(ins));
-    for (const fe of faceBlock.entities ?? []) {
-      const faceEnt = fe as IEntity;
-      if (faceEnt.type === "3DFACE") {
-        const face = faceEnt as I3DfaceEntity;
-        for (const v of face.vertices ?? []) {
-          out.vertices.push(applyT(v, childT));
-        }
-        foundFaces = true;
-      } else if (faceEnt.type === "CIRCLE") {
-        const circle = faceEnt as ICircleEntity;
-        const center = applyT(circle.center, childT);
-        out.holes.push({ ...center, dia: (circle.radius ?? 0) * 2 });
+  // Levels 1-2: recurse through face sub-blocks
+  function gatherFaces(blockName: string, tx: Transform, depth: number): void {
+    if (depth > 2) return;
+    const block = blocks[blockName];
+    if (!block) return;
+    for (const fe of block.entities ?? []) {
+      const e = fe as IEntity;
+      if (e.type === "3DFACE") {
+        const face = e as I3DfaceEntity;
+        for (const v of face.vertices ?? []) out.vertices.push(applyT(v, tx));
+      } else if (e.type === "CIRCLE") {
+        const circle = e as ICircleEntity;
+        out.holes.push({ ...applyT(circle.center, tx), dia: (circle.radius ?? 0) * 2 });
+      } else if (e.type === "INSERT") {
+        const ins = e as IInsertEntity;
+        gatherFaces(ins.name, composeT(tx, insertTransform(ins)), depth + 1);
       }
     }
   }
 
-  // Fallback: if no face sub-blocks found, use 3DFACEs directly in panel block
-  if (!foundFaces) {
+  for (const ent of panelBlock.entities ?? []) {
+    const e = ent as IEntity;
+    if (e.type === "INSERT") {
+      const ins = e as IInsertEntity;
+      gatherFaces(ins.name, composeT(t, insertTransform(ins)), 1);
+    }
+  }
+
+  // Fallback: no sub-block hierarchy found — use panel block's own 3DFACEs
+  if (out.vertices.length === 0) {
     for (const ent of panelBlock.entities ?? []) {
       const e = ent as IEntity;
       if (e.type === "3DFACE") {
         const face = e as I3DfaceEntity;
-        for (const v of face.vertices ?? []) {
-          out.vertices.push(applyT(v, t));
-        }
+        for (const v of face.vertices ?? []) out.vertices.push(applyT(v, t));
       }
     }
   }
@@ -328,8 +334,19 @@ function extractCabinet(dxf: IDxf): ParseResult {
   const [dSmall, dMid, dLarge] = [cabinetW, cabinetH, cabinetD].sort((a, b) => a - b);
 
   if (process.env.NODE_ENV === "development") {
+    // These values are the EXACT values going into the returned object — same path as UI + 3D.
     console.log(
-      `[polyboardImport] ${cabinetBlockName}: W=${dMid} H=${dLarge} D=${dSmall} (${panels.length} panels)`,
+      `[polyboardImport] returned → W=${dMid} H=${dLarge} D=${dSmall} (${panels.length} panels)`,
+    );
+    console.table(
+      panels.map((p) => ({
+        name: p.partName,
+        W: p.width_mm,
+        H: p.height_mm,
+        T: p.thickness_mm,
+        role: p.part_role,
+        holes: p.holeCount,
+      })),
     );
   }
 
