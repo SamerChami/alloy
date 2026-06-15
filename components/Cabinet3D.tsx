@@ -2,9 +2,9 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
-import { buildCabinetBoxes } from "@/lib/cabinet3d";
+import { buildCabinetBoxes, buildBoxesFromRawPanels } from "@/lib/cabinet3d";
 import { useLang } from "@/components/lang-provider";
-import type { PartRole } from "@/lib/cabinet3d";
+import type { PartRole, RawPanel3D } from "@/lib/cabinet3d";
 import type { BomLineState } from "@/app/(app)/products/bom_types";
 
 type Props = {
@@ -12,6 +12,8 @@ type Props = {
   cabinetHeight: number;
   cabinetDepth: number;
   parts: BomLineState[];
+  // When provided, use real assembled positions instead of role synthesis.
+  rawPanels?: RawPanel3D[];
 };
 
 const ROLE_COLOR: Record<PartRole, number> = {
@@ -32,6 +34,7 @@ export function Cabinet3D({
   cabinetHeight,
   cabinetDepth,
   parts,
+  rawPanels,
 }: Props) {
   const { t } = useLang();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -91,18 +94,29 @@ export function Cabinet3D({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W, H);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;   // PCFSoft is deprecated in r168+
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+    // Soft ambient base so all faces are visible
+    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
     scene.add(ambient);
 
-    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-    dir.position.set(3, 5, 4);
+    // Hemisphere gives warm-top / cool-bottom gradient that reads depth on flat panels
+    const hemi = new THREE.HemisphereLight(0xfff4e8, 0xd4c8b8, 0.6);
+    scene.add(hemi);
+
+    // Key light from front-top-right
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    dir.position.set(2, 4, 3);
     dir.castShadow = true;
     dir.shadow.mapSize.set(1024, 1024);
     scene.add(dir);
+
+    // Subtle fill from back-left so rear/side faces aren't pitch black
+    const fill = new THREE.DirectionalLight(0xffffff, 0.25);
+    fill.position.set(-2, 1, -2);
+    scene.add(fill);
 
     const group = new THREE.Group();
     scene.add(group);
@@ -153,27 +167,38 @@ export function Cabinet3D({
       const cH = cabinetHeight > 0 ? cabinetHeight : 720;
       const cD = cabinetDepth  > 0 ? cabinetDepth  : 580;
 
-      const inputs = parts
-        .filter(l => l.line_type === "panel")
-        .slice(0, 60)
-        .map(l => ({
-          role: (l.part_role || null) as PartRole | null,
-          part_name: l.part_name,
-          width_mm:     parseFloat(l.width_mm)     || 0,
-          height_mm:    parseFloat(l.height_mm)    || 0,
-          depth_mm:     l.depth_mm     !== "" ? parseFloat(l.depth_mm)     : null,
-          pos_offset_mm: l.pos_offset_mm !== "" ? parseFloat(l.pos_offset_mm) : null,
-          qty: parseFloat(l.qty) || 1,
-        }));
-
-      const boxes = buildCabinetBoxes(cW, cH, cD, inputs, showDoors, explode);
+      // Use real assembled positions when available (e.g. from .3ds import);
+      // fall back to role-synthesis when rawPanels is absent (BOM editor path).
+      const boxes = rawPanels && rawPanels.length > 0
+        ? buildBoxesFromRawPanels(rawPanels, showDoors, explode)
+        : buildCabinetBoxes(
+            cW, cH, cD,
+            parts
+              .filter(l => l.line_type === "panel")
+              .slice(0, 60)
+              .map(l => ({
+                role: (l.part_role || null) as PartRole | null,
+                part_name: l.part_name,
+                width_mm:      parseFloat(l.width_mm)      || 0,
+                height_mm:     parseFloat(l.height_mm)     || 0,
+                depth_mm:      l.depth_mm      !== "" ? parseFloat(l.depth_mm)      : null,
+                pos_offset_mm: l.pos_offset_mm !== "" ? parseFloat(l.pos_offset_mm) : null,
+                qty: parseFloat(l.qty) || 1,
+              })),
+            showDoors,
+            explode,
+          );
 
       for (const box of boxes) {
         const geo = new THREE.BoxGeometry(box.w, box.h, box.d);
+        const isDoor = box.role === "door" || box.role === "drawer_front";
         const mat = new THREE.MeshStandardMaterial({
-          color:     ROLE_COLOR[box.role] ?? 0xD9D5CE,
-          roughness: 0.75,
-          metalness: 0.02,
+          color:       ROLE_COLOR[box.role] ?? 0xD9D5CE,
+          roughness:   0.8,
+          metalness:   0.02,
+          // Doors are semi-transparent so interior shelves show through
+          transparent: isDoor,
+          opacity:     isDoor ? 0.88 : 1.0,
         });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.set(box.x, box.y, box.z);
@@ -181,8 +206,9 @@ export function Cabinet3D({
         mesh.receiveShadow = true;
         group.add(mesh);
 
+        // Edge outlines ensure thin panels (backs, trays, doors) read as solid boards
         const edgesGeo = new THREE.EdgesGeometry(geo);
-        const edgesMat = new THREE.LineBasicMaterial({ color: 0x888880, linewidth: 1 });
+        const edgesMat = new THREE.LineBasicMaterial({ color: 0x5a5a52 });
         mesh.add(new THREE.LineSegments(edgesGeo, edgesMat));
       }
 
@@ -191,12 +217,14 @@ export function Cabinet3D({
       orbit.cx     = cW / 1000 / 2;
       orbit.cy     = cH / 1000 / 2;
       orbit.cz     = cD / 1000 / 2;
-      orbit.radius = Math.max(cW, cH, cD) / 1000 * 2.1;
+      // phi=0.4π ≈ 72° from top — more front-facing angle for tall cabinets
+      orbit.phi    = Math.PI * 0.4;
+      orbit.radius = Math.max(cW, cH, cD) / 1000 * 2.0;
       updateCamera();
     }, 150);
 
     return () => clearTimeout(tid);
-  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, showDoors, explode, updateCamera]);
+  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, rawPanels, showDoors, explode, updateCamera]);
 
   // ── mouse orbit ────────────────────────────────────────────────────
   function onMouseDown(e: React.MouseEvent) {
@@ -230,12 +258,12 @@ export function Cabinet3D({
 
   function resetView() {
     const o = orbitRef.current;
-    o.theta  = Math.PI * 0.75;
-    o.phi    = Math.PI / 3;
     const cW = cabinetWidth  > 0 ? cabinetWidth  : 800;
     const cH = cabinetHeight > 0 ? cabinetHeight : 720;
     const cD = cabinetDepth  > 0 ? cabinetDepth  : 580;
-    o.radius = Math.max(cW, cH, cD) / 1000 * 2.1;
+    o.theta  = Math.PI * 0.75;     // 3/4 front-left angle
+    o.phi    = Math.PI * 0.4;      // 72° from top — upright tall-cabinet view
+    o.radius = Math.max(cW, cH, cD) / 1000 * 2.0;
     updateCamera();
   }
 

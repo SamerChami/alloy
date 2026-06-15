@@ -75,7 +75,6 @@ function applyT(p: Pt3, t: Transform): Pt3 {
 
 function composeT(outer: Transform, inner: Transform): Transform {
   // Compose: outer ∘ inner  (inner applied first)
-  // The inner translation, after outer scale + rotate + translate:
   const rad = (outer.angle * Math.PI) / 180;
   const c = Math.cos(rad);
   const s = Math.sin(rad);
@@ -102,89 +101,6 @@ function insertTransform(ins: IInsertEntity): Transform {
     sy: ins.yScale ?? 1,
     sz: ins.zScale ?? 1,
   };
-}
-
-// ── geometry collection ───────────────────────────────────────────────
-
-type CollectResult = { vertices: Pt3[]; holes: HoleInfo[] };
-
-// Collect geometry for one panel block.
-//
-// Level 0 (the panel block itself): collect CIRCLEs only.
-//   The panel block may carry 3DFACEs in panel-local coordinates that
-//   conflict with the world-space 3DFACEs in its face sub-blocks, so we
-//   deliberately skip them here.
-//
-// Levels 1–2 (face sub-blocks via INSERTs): collect 3DFACEs + CIRCLEs.
-//   Some Polyboard exports nest faces one INSERT deep; others two deep.
-//   We recurse up to depth 2, which covers both cases without risking
-//   cross-panel contamination.
-//
-// Fallback: if zero vertices were found via sub-blocks, collect 3DFACEs
-//   directly from the panel block (handles flat DXF exports with no
-//   sub-block hierarchy).
-function collectPanel(
-  blocks: Record<string, IBlock>,
-  panelBlockName: string,
-  t: Transform,
-  warnings: string[],
-): CollectResult {
-  const out: CollectResult = { vertices: [], holes: [] };
-  const panelBlock = blocks[panelBlockName];
-  if (!panelBlock) {
-    warnings.push(`Panel block '${panelBlockName}' not found`);
-    return out;
-  }
-
-  // Level 0: CIRCLEs only
-  for (const ent of panelBlock.entities ?? []) {
-    const e = ent as IEntity;
-    if (e.type === "CIRCLE") {
-      const circle = e as ICircleEntity;
-      out.holes.push({ ...applyT(circle.center, t), dia: (circle.radius ?? 0) * 2 });
-    }
-  }
-
-  // Levels 1-2: recurse through face sub-blocks
-  function gatherFaces(blockName: string, tx: Transform, depth: number): void {
-    if (depth > 2) return;
-    const block = blocks[blockName];
-    if (!block) return;
-    for (const fe of block.entities ?? []) {
-      const e = fe as IEntity;
-      if (e.type === "3DFACE") {
-        const face = e as I3DfaceEntity;
-        for (const v of face.vertices ?? []) out.vertices.push(applyT(v, tx));
-      } else if (e.type === "CIRCLE") {
-        const circle = e as ICircleEntity;
-        out.holes.push({ ...applyT(circle.center, tx), dia: (circle.radius ?? 0) * 2 });
-      } else if (e.type === "INSERT") {
-        const ins = e as IInsertEntity;
-        gatherFaces(ins.name, composeT(tx, insertTransform(ins)), depth + 1);
-      }
-    }
-  }
-
-  for (const ent of panelBlock.entities ?? []) {
-    const e = ent as IEntity;
-    if (e.type === "INSERT") {
-      const ins = e as IInsertEntity;
-      gatherFaces(ins.name, composeT(t, insertTransform(ins)), 1);
-    }
-  }
-
-  // Fallback: no sub-block hierarchy found — use panel block's own 3DFACEs
-  if (out.vertices.length === 0) {
-    for (const ent of panelBlock.entities ?? []) {
-      const e = ent as IEntity;
-      if (e.type === "3DFACE") {
-        const face = e as I3DfaceEntity;
-        for (const v of face.vertices ?? []) out.vertices.push(applyT(v, t));
-      }
-    }
-  }
-
-  return out;
 }
 
 // ── bbox ──────────────────────────────────────────────────────────────
@@ -230,6 +146,194 @@ function guessMaterial(name: string, thickness: number): string {
   return "Carcass 18";
 }
 
+// ── geometry collection ───────────────────────────────────────────────
+
+// Recursively gather 3DFACE vertices from a block, applying tx, depth-limited.
+function gatherLeafFaces(
+  blocks: Record<string, IBlock>,
+  blockName: string,
+  tx: Transform,
+  depth: number,
+): Pt3[] {
+  if (depth > 2) return [];
+  const block = blocks[blockName];
+  if (!block) return [];
+  const verts: Pt3[] = [];
+  for (const fe of block.entities ?? []) {
+    const e = fe as IEntity;
+    if (e.type === "3DFACE") {
+      const face = e as I3DfaceEntity;
+      for (const v of face.vertices ?? []) verts.push(applyT(v, tx));
+    } else if (e.type === "INSERT") {
+      const ins = e as IInsertEntity;
+      verts.push(...gatherLeafFaces(blocks, ins.name, composeT(tx, insertTransform(ins)), depth + 1));
+    }
+  }
+  return verts;
+}
+
+type LeafResult = { vertices: Pt3[]; holes: HoleInfo[]; suffix: string };
+
+// Collect leaves for one panel block in panel-LOCAL coordinates (IDENTITY base).
+// A panel block with N face-sub-block INSERTs yields N leaves (one per INSERT).
+// This correctly splits double-door blocks into individual leaves.
+// Holes (CIRCLEs at panel level) are distributed to leaves by X-range overlap.
+function collectPanelLeaves(
+  blocks: Record<string, IBlock>,
+  panelBlockName: string,
+  warnings: string[],
+): LeafResult[] {
+  const panelBlock = blocks[panelBlockName];
+  if (!panelBlock) {
+    warnings.push(`Panel block '${panelBlockName}' not found`);
+    return [];
+  }
+
+  // Collect holes from the panel block in LOCAL frame
+  const panelHoles: HoleInfo[] = [];
+  for (const ent of panelBlock.entities ?? []) {
+    const e = ent as IEntity;
+    if (e.type === "CIRCLE") {
+      const circle = e as ICircleEntity;
+      panelHoles.push({ ...circle.center, dia: (circle.radius ?? 0) * 2 });
+    }
+  }
+
+  // Find face-sub-block INSERTs in the panel block
+  const faceInserts: IInsertEntity[] = [];
+  for (const ent of panelBlock.entities ?? []) {
+    const e = ent as IEntity;
+    if (e.type === "INSERT") faceInserts.push(e as IInsertEntity);
+  }
+
+  // Fallback: no INSERTs → use the panel block's own 3DFACEs directly
+  if (faceInserts.length === 0) {
+    const verts: Pt3[] = [];
+    for (const ent of panelBlock.entities ?? []) {
+      const e = ent as IEntity;
+      if (e.type === "3DFACE") {
+        const face = e as I3DfaceEntity;
+        for (const v of face.vertices ?? []) verts.push(v);
+      }
+    }
+    if (verts.length === 0) return [];
+    return [{ vertices: verts, holes: panelHoles, suffix: "" }];
+  }
+
+  // Collect vertices per leaf INSERT (LOCAL frame: each INSERT's own offset is applied)
+  const rawLeaves = faceInserts.map(ins => ({
+    ins,
+    verts: gatherLeafFaces(blocks, ins.name, insertTransform(ins), 1),
+  }));
+
+  // Drop leaves with no geometry
+  const valid = rawLeaves.filter(l => l.verts.length > 0);
+
+  // If all INSERTs yielded no faces, fall back to panel block's own 3DFACEs
+  if (valid.length === 0) {
+    const verts: Pt3[] = [];
+    for (const ent of panelBlock.entities ?? []) {
+      const e = ent as IEntity;
+      if (e.type === "3DFACE") {
+        const face = e as I3DfaceEntity;
+        for (const v of face.vertices ?? []) verts.push(v);
+      }
+    }
+    if (verts.length === 0) return [];
+    return [{ vertices: verts, holes: panelHoles, suffix: "" }];
+  }
+
+  // Distribute holes to leaves by X-range overlap (5 mm tolerance)
+  const leafBboxes = valid.map(l => bbox(l.verts));
+  const leafHoles: HoleInfo[][] = valid.map(() => []);
+  for (const hole of panelHoles) {
+    let placed = false;
+    for (let i = 0; i < valid.length; i++) {
+      const bb = leafBboxes[i];
+      if (bb && hole.x >= bb.minX - 5 && hole.x <= bb.maxX + 5) {
+        leafHoles[i].push(hole);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) leafHoles[0].push(hole);
+  }
+
+  // Suffixes: single leaf → no suffix; 2 leaves → L/R; more → numeric
+  const suffixes =
+    valid.length === 1
+      ? [""]
+      : valid.length === 2
+      ? [" — L", " — R"]
+      : valid.map((_, i) => ` — ${i + 1}`);
+
+  return valid.map((l, i) => ({
+    vertices: l.verts,
+    holes: leafHoles[i],
+    suffix: suffixes[i],
+  }));
+}
+
+// ── overall dims from carcass panel sizes ─────────────────────────────
+
+// Derive cabinet W×H×D from carcass SIZES (not from scattered DXF positions).
+// height_mm = panel's largest extent; width_mm = middle extent; thickness_mm = smallest.
+function deriveOverallDims(panels: ImportedPanel[]): { W: number; H: number; D: number } {
+  const sides = panels.filter(p => p.part_role === "side_left" || p.part_role === "side_right");
+  const tops  = panels.filter(p => p.part_role === "top" || p.part_role === "bottom");
+  const shelves = panels.filter(p => p.part_role === "shelf" || p.part_role === "divider_v");
+
+  // Most common thickness among structural panels
+  const structural = [...sides, ...tops];
+  const thickMap = new Map<number, number>();
+  for (const p of structural) {
+    const t = r1(p.thickness_mm);
+    thickMap.set(t, (thickMap.get(t) ?? 0) + 1);
+  }
+  let thick = 18;
+  let bestCount = 0;
+  for (const [t, count] of thickMap) {
+    if (count > bestCount) { bestCount = count; thick = t; }
+  }
+
+  // H = largest dimension of side panels (the cabinet height)
+  let H = 0;
+  if (sides.length > 0) {
+    H = Math.max(...sides.map(p => p.height_mm));
+  } else if (panels.length > 0) {
+    H = Math.max(...panels.map(p => p.height_mm));
+  }
+
+  // W = largest dimension of top/bottom panels + 2×thick (adds both side thicknesses)
+  let W = 0;
+  if (tops.length > 0) {
+    W = r1(Math.max(...tops.map(p => p.height_mm)) + 2 * thick);
+  } else if (shelves.length > 0) {
+    W = r1(Math.max(...shelves.map(p => p.width_mm)) + 2 * thick);
+  } else if (panels.length > 0) {
+    W = r1(Math.max(...panels.map(p => p.width_mm)) + 2 * thick);
+  }
+
+  // D = carcass side depth + door/front thickness + reveal
+  // The door sits proud of the carcass front face, adding its thickness + a 2 mm reveal.
+  const carcass_side_depth = sides.length > 0
+    ? Math.max(...sides.map(p => p.width_mm))
+    : shelves.length > 0
+      ? Math.max(...shelves.map(p => p.width_mm))
+      : 0;
+
+  const fronts = panels.filter(p => p.part_role === "door" || p.part_role === "drawer_front");
+  const front_thickness = fronts.length > 0 ? Math.max(...fronts.map(p => p.thickness_mm)) : 0;
+  const reveal = front_thickness > 0 ? 2 : 0;
+  const D = r1(carcass_side_depth + front_thickness + reveal);
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[depth]", { carcass: carcass_side_depth, front: front_thickness, total: D });
+  }
+
+  return { W: r1(W), H: r1(H), D };
+}
+
 // ── main extraction ───────────────────────────────────────────────────
 
 function extractCabinet(dxf: IDxf): ParseResult {
@@ -266,13 +370,6 @@ function extractCabinet(dxf: IDxf): ParseResult {
   const cabinetBlock = blocks[cabinetBlockName];
   const panels: ImportedPanel[] = [];
 
-  // Running union of per-panel bboxes — used for the overall cabinet dims.
-  // We derive this from the SAME per-panel boxes the table uses, not from a
-  // separate raw-vertex pool, so the two are guaranteed to agree.
-  let gMinX = Infinity, gMaxX = -Infinity;
-  let gMinY = Infinity, gMaxY = -Infinity;
-  let gMinZ = Infinity, gMaxZ = -Infinity;
-
   for (const ent of cabinetBlock.entities ?? []) {
     if ((ent as IEntity).type !== "INSERT") continue;
     const ins = ent as IInsertEntity;
@@ -283,69 +380,69 @@ function extractCabinet(dxf: IDxf): ParseResult {
       continue;
     }
 
+    // Cabinet INSERT transform — used only for world POSITION (the DXF is a flat
+    // nesting layout, so positions cannot be used for overall cabinet dims).
     const t = composeT(IDENTITY, insertTransform(ins));
-    const collected = collectPanel(blocks, panelBlockName, t, warnings);
 
-    if (collected.vertices.length === 0) {
-      warnings.push(`No 3D faces in '${panelBlockName}' — skipped.`);
+    const leaves = collectPanelLeaves(blocks, panelBlockName, warnings);
+    if (leaves.length === 0) {
+      warnings.push(`No geometry in '${panelBlockName}' — skipped.`);
       continue;
     }
-
-    const bb = bbox(collected.vertices)!;
-
-    // Expand global bbox with this panel's bbox (same source as per-panel table)
-    if (bb.minX < gMinX) gMinX = bb.minX; if (bb.maxX > gMaxX) gMaxX = bb.maxX;
-    if (bb.minY < gMinY) gMinY = bb.minY; if (bb.maxY > gMaxY) gMaxY = bb.maxY;
-    if (bb.minZ < gMinZ) gMinZ = bb.minZ; if (bb.maxZ > gMaxZ) gMaxZ = bb.maxZ;
-    const extentX = bb.maxX - bb.minX;
-    const extentY = bb.maxY - bb.minY;
-    const extentZ = bb.maxZ - bb.minZ;
-    const sorted = [extentX, extentY, extentZ].sort((a, b) => a - b);
-    const thickness = sorted[0];
-    // Use the two larger extents as W and H (larger = H)
-    const panelW = sorted[1];
-    const panelH = sorted[2];
-
-    const center: Pt3 = {
-      x: (bb.minX + bb.maxX) / 2,
-      y: (bb.minY + bb.maxY) / 2,
-      z: (bb.minZ + bb.maxZ) / 2,
-    };
 
     // Extract part name (strip cabinet prefix "CabinetName.")
     const dotIdx = panelBlockName.indexOf(".");
     const partName = dotIdx >= 0 ? panelBlockName.slice(dotIdx + 1) : panelBlockName;
-    // Strip trailing face-block suffix like "1" or " (1)" — Polyboard face blocks have these
     const cleanName = partName.replace(/\s*\(\d+\)$/, "").replace(/\d+$/, "").trim();
-    const displayName = partName; // keep numbering for display
 
-    panels.push({
-      partName: displayName,
-      width_mm: r1(panelW),
-      height_mm: r1(panelH),
-      thickness_mm: r1(thickness),
-      pos: { x: r1(center.x), y: r1(center.y), z: r1(center.z) },
-      holeCount: collected.holes.length,
-      holes: collected.holes,
-      materialRef: guessMaterial(cleanName, thickness),
-      qty: 1,
-      part_role: inferRole(cleanName),
-    });
+    for (const leaf of leaves) {
+      if (leaf.vertices.length === 0) continue;
+
+      const localBb = bbox(leaf.vertices)!;
+
+      if (process.env.NODE_ENV === "development" && panelBlockName.toLowerCase().includes("door")) {
+        console.log("[door dbg]", panelBlockName + leaf.suffix, "zmin", localBb.minZ, "zmax", localBb.maxZ, "nverts", leaf.vertices.length);
+      }
+
+      const extentX = localBb.maxX - localBb.minX;
+      const extentY = localBb.maxY - localBb.minY;
+      const extentZ = localBb.maxZ - localBb.minZ;
+      const sorted = [extentX, extentY, extentZ].sort((a, b) => a - b);
+      const thickness = sorted[0];
+      const panelW    = sorted[1];
+      const panelH    = sorted[2];
+
+      // World position: apply cabinet INSERT transform to the local bbox centre
+      const localCenter: Pt3 = {
+        x: (localBb.minX + localBb.maxX) / 2,
+        y: (localBb.minY + localBb.maxY) / 2,
+        z: (localBb.minZ + localBb.maxZ) / 2,
+      };
+      const center = applyT(localCenter, t);
+
+      const displayName = partName + leaf.suffix;
+
+      panels.push({
+        partName: displayName,
+        width_mm: r1(panelW),
+        height_mm: r1(panelH),
+        thickness_mm: r1(thickness),
+        pos: { x: r1(center.x), y: r1(center.y), z: r1(center.z) },
+        holeCount: leaf.holes.length,
+        holes: leaf.holes,
+        materialRef: guessMaterial(cleanName, thickness),
+        qty: 1,
+        part_role: inferRole(cleanName),
+      });
+    }
   }
 
-  // Overall cabinet dims: union of the per-panel bboxes (same source as the table)
-  const cabinetW = gMinX === Infinity ? 0 : r1(gMaxX - gMinX);
-  const cabinetH = gMinY === Infinity ? 0 : r1(gMaxY - gMinY);
-  const cabinetD = gMinZ === Infinity ? 0 : r1(gMaxZ - gMinZ);
-
-  // Sort dims so largest = height
-  const [dSmall, dMid, dLarge] = [cabinetW, cabinetH, cabinetD].sort((a, b) => a - b);
+  // Derive overall cabinet dims from carcass PANEL SIZES (not from scattered
+  // DXF positions — this DXF is a flat nesting layout, not an assembly).
+  const { W, H, D } = deriveOverallDims(panels);
 
   if (process.env.NODE_ENV === "development") {
-    // These values are the EXACT values going into the returned object — same path as UI + 3D.
-    console.log(
-      `[polyboardImport] returned → W=${dMid} H=${dLarge} D=${dSmall} (${panels.length} panels)`,
-    );
+    console.log("[overall derived]", { W, H, D });
     console.table(
       panels.map((p) => ({
         name: p.partName,
@@ -361,9 +458,9 @@ function extractCabinet(dxf: IDxf): ParseResult {
   return {
     cabinet: {
       name: cabinetBlockName,
-      width_mm: dMid,
-      height_mm: dLarge,
-      depth_mm: dSmall,
+      width_mm: W,
+      height_mm: H,
+      depth_mm: D,
       panels,
     },
     warnings,

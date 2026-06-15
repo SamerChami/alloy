@@ -33,6 +33,15 @@ export type Box3D = {
   role: PartRole;
 };
 
+// Minimal panel shape for real-position 3D rendering (satisfied by ImportedPanel).
+export type RawPanel3D = {
+  part_role: PartRole | string;
+  width_mm:     number; // middle sorted extent (mm)
+  height_mm:    number; // largest sorted extent (mm)
+  thickness_mm: number; // smallest sorted extent (mm)
+  pos: { x: number; y: number; z: number }; // world centre: x=width, y=height, z=depth
+};
+
 const DEFAULT_T = 18; // structural panel thickness mm
 const EXPLODE_M = 0.04; // metres to separate panels when exploding
 
@@ -248,6 +257,66 @@ export function buildCabinetBoxes(
         }
         break;
     }
+  }
+
+  return boxes;
+}
+
+// Build Box3D array from real assembled panel positions (e.g. from .3ds import).
+// Uses role-based axis assignment to map sorted extents (T/W/H) to THREE.js w/h/d.
+export function buildBoxesFromRawPanels(
+  panels: RawPanel3D[],
+  showDoors = true,
+  explode = false,
+): Box3D[] {
+  const boxes: Box3D[] = [];
+  const E = EXPLODE_M;
+
+  for (const panel of panels) {
+    const role = (panel.part_role || "other") as PartRole;
+    if ((role === "door" || role === "drawer_front") && !showDoors) continue;
+
+    const T = m(panel.thickness_mm); // smallest (thickness)
+    const W = m(panel.width_mm);     // middle
+    const H = m(panel.height_mm);    // largest
+
+    // Assign sorted extents to THREE.js axes based on role orientation.
+    // App axes: x=width, y=height, z=depth (same as 3ds after remapping).
+    let bw: number, bh: number, bd: number;
+    switch (role) {
+      case "side_left":
+      case "side_right":
+      case "divider_v":
+        bw = T; bh = H; bd = W; // thin in X, tall in Y, deep in Z
+        break;
+      case "top":
+      case "bottom":
+      case "shelf":
+        bw = H; bh = T; bd = W; // wide in X, thin in Y, deep in Z
+        break;
+      default: // back, door, drawer_front, other
+        bw = W; bh = H; bd = T; // medium-wide in X, tall in Y, thin in Z
+        break;
+    }
+
+    // Real assembled position (already in app convention: x=width, y=height, z=depth)
+    let x = m(panel.pos.x);
+    let y = m(panel.pos.y);
+    let z = m(panel.pos.z);
+
+    if (explode) {
+      switch (role) {
+        case "side_left":    x -= E;     break;
+        case "side_right":   x += E;     break;
+        case "top":          y += E;     break;
+        case "bottom":       y -= E;     break;
+        case "back":         z -= E;     break;
+        case "door":
+        case "drawer_front": z += E * 2; break;
+      }
+    }
+
+    boxes.push({ w: bw, h: bh, d: bd, x, y, z, role });
   }
 
   return boxes;

@@ -175,9 +175,9 @@ export const dict = {
     partRole_door:         "Door",
     partRole_drawer_front: "Drawer front",
     partRole_other:        "Other",
-    // DXF importer
-    importDxf:             "Import from Polyboard (DXF)",
-    chooseDxf:             "Choose DXF file",
+    // Polyboard importer (.3ds primary, .dxf also accepted)
+    importDxf:             "Import from Polyboard (.3ds / DXF)",
+    chooseDxf:             "Choose .3ds or .dxf file",
     detectedPanels:        "Detected panels",
     createProduct:         "Create product",
     parserWarnings:        "Parser warnings",
@@ -187,10 +187,10 @@ export const dict = {
     importedFrom:          "Imported from",
     cabinetName:           "Cabinet name",
     overallDims:           "Overall dimensions",
-    noFileChosen:          "Drop or choose a .dxf file to begin",
-    importSuccess:         "Product created from DXF",
+    noFileChosen:          "Drop or choose a .3ds / .dxf file to begin",
+    importSuccess:         "Product created from Polyboard file",
     importNote:            "Unmapped panels contribute JD 0.000 until a panel material is assigned.",
-    importHint:            "Fittings (hinges, cam locks, etc.) are not in the DXF — add them manually via the BOM after import.",
+    importHint:            "Holes and materials are not in the .3ds — import the DXF separately or add them manually via the BOM after import.",
   },
   ar: {
     appName: "ALLOY",
@@ -362,9 +362,9 @@ export const dict = {
     partRole_door:         "باب",
     partRole_drawer_front: "واجهة درج",
     partRole_other:        "أخرى",
-    // DXF importer
-    importDxf:             "استيراد من Polyboard (DXF)",
-    chooseDxf:             "اختر ملف DXF",
+    // Polyboard importer (.3ds primary, .dxf also accepted)
+    importDxf:             "استيراد من Polyboard (.3ds / DXF)",
+    chooseDxf:             "اختر ملف .3ds أو .dxf",
     detectedPanels:        "الألواح المكتشفة",
     createProduct:         "إنشاء منتج",
     parserWarnings:        "تحذيرات المحلل",
@@ -374,10 +374,10 @@ export const dict = {
     importedFrom:          "مستورد من",
     cabinetName:           "اسم الخزانة",
     overallDims:           "الأبعاد الكلية",
-    noFileChosen:          "اسحب أو اختر ملف .dxf للبدء",
-    importSuccess:         "تم إنشاء المنتج من ملف DXF",
+    noFileChosen:          "اسحب أو اختر ملف .3ds / .dxf للبدء",
+    importSuccess:         "تم إنشاء المنتج من ملف Polyboard",
     importNote:            "الألواح غير المرتبطة بمادة تساهم بـ JD 0.000 حتى يتم تعيين مادة اللوح.",
-    importHint:            "القطع (المفصلات، قفلات الكاميرا، إلخ) غير موجودة في ملف DXF — أضفها يدوياً عبر قائمة المواد بعد الاستيراد.",
+    importHint:            "الثقوب والمواد غير موجودة في ملف .3ds — استورد ملف DXF منفصلاً أو أضفها يدوياً عبر قائمة المواد بعد الاستيراد.",
   },
 } as const;
 
