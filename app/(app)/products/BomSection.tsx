@@ -37,6 +37,9 @@ export function emptyPanelLine(): BomLineState {
     part_role: "",
     depth_mm: "",
     pos_offset_mm: "",
+    pos_x_mm: "",
+    pos_y_mm: "",
+    pos_z_mm: "",
   };
 }
 
@@ -55,6 +58,9 @@ export function emptyComponentLine(): BomLineState {
     part_role: "",
     depth_mm: "",
     pos_offset_mm: "",
+    pos_x_mm: "",
+    pos_y_mm: "",
+    pos_z_mm: "",
   };
 }
 

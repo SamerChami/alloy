@@ -40,4 +40,8 @@ export type BomLineState = {
   part_role: string;
   depth_mm: string;
   pos_offset_mm: string;
+  // Real assembled world-centre positions (from .3ds import, saved via 08_bom_pos.sql)
+  pos_x_mm?: string;
+  pos_y_mm?: string;
+  pos_z_mm?: string;
 };

@@ -17,6 +17,7 @@ import dynamic from "next/dynamic";
 import { BomSection, newBomKey, emptyPanelLine, emptyComponentLine } from "./BomSection";
 import type { BomLineState, PanelOption, ComponentOption, BandingType } from "./bom_types";
 import type { Product } from "./types";
+import type { RawPanel3D } from "@/lib/cabinet3d";
 
 const Cabinet3D = dynamic(
   () => import("@/components/Cabinet3D").then(m => ({ default: m.Cabinet3D })),
@@ -83,6 +84,9 @@ function dbLineToBomState(row: Record<string, unknown>): BomLineState {
     part_role: (row.part_role as string | null) ?? "",
     depth_mm: row.depth_mm != null ? String(row.depth_mm) : "",
     pos_offset_mm: row.pos_offset_mm != null ? String(row.pos_offset_mm) : "",
+    pos_x_mm: row.pos_x_mm != null ? String(row.pos_x_mm) : "",
+    pos_y_mm: row.pos_y_mm != null ? String(row.pos_y_mm) : "",
+    pos_z_mm: row.pos_z_mm != null ? String(row.pos_z_mm) : "",
   };
 }
 
@@ -102,6 +106,9 @@ function bomStateToInsert(line: BomLineState, productId: string, idx: number) {
     part_role: line.part_role || null,
     depth_mm: line.depth_mm !== "" ? parseFloat(line.depth_mm) : null,
     pos_offset_mm: line.pos_offset_mm !== "" ? parseFloat(line.pos_offset_mm) : null,
+    pos_x_mm: line.pos_x_mm !== "" && line.pos_x_mm != null ? parseFloat(line.pos_x_mm) : null,
+    pos_y_mm: line.pos_y_mm !== "" && line.pos_y_mm != null ? parseFloat(line.pos_y_mm) : null,
+    pos_z_mm: line.pos_z_mm !== "" && line.pos_z_mm != null ? parseFloat(line.pos_z_mm) : null,
   };
 }
 
@@ -182,6 +189,28 @@ export function ProductForm({
       marginPct: parseFloat(form.margin_pct) || 0,
     });
   }, [bomLines, panels, allComponents, bandingTypes, form.labor_jod, form.margin_pct]);
+
+  // Build real-position panel array when BOM lines have saved 3D positions
+  const rawPanels3D = useMemo<RawPanel3D[] | undefined>(() => {
+    const positioned = bomLines.filter(
+      l => l.line_type === "panel" &&
+        l.pos_x_mm !== "" && l.pos_x_mm != null &&
+        l.pos_y_mm !== "" && l.pos_y_mm != null &&
+        l.pos_z_mm !== "" && l.pos_z_mm != null,
+    );
+    if (positioned.length === 0) return undefined;
+    return positioned.map(l => ({
+      part_role: l.part_role || "other",
+      width_mm:     parseFloat(l.width_mm)  || 0,
+      height_mm:    parseFloat(l.height_mm) || 0,
+      thickness_mm: parseFloat(l.depth_mm)  || 18,
+      pos: {
+        x: parseFloat(l.pos_x_mm!),
+        y: parseFloat(l.pos_y_mm!),
+        z: parseFloat(l.pos_z_mm!),
+      },
+    }));
+  }, [bomLines]);
 
   // Auto-fill unit price from rollup when not overridden and BOM has loaded
   useEffect(() => {
@@ -406,6 +435,7 @@ export function ProductForm({
               cabinetHeight={parseFloat(form.height_mm) || 0}
               cabinetDepth={parseFloat(form.depth_mm)  || 0}
               parts={bomLines}
+              rawPanels={rawPanels3D}
             />
           )}
 

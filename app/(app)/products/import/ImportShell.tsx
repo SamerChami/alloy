@@ -11,6 +11,7 @@ import type { PartRole } from "@/lib/cabinet3d";
 import type { PanelOption } from "../bom_types";
 import type { TKey } from "@/lib/i18n";
 import type { ImportedPanel, ParseResult } from "@/lib/dxf/polyboardImport";
+import type { RawPanel3D } from "@/lib/cabinet3d";
 
 const Cabinet3D = dynamic(
   () => import("@/components/Cabinet3D").then(m => ({ default: m.Cabinet3D })),
@@ -42,6 +43,9 @@ function toBomLineState(rows: RowState[], cabinetDepth: number) {
     part_role: r.editedRole || r.part_role,
     depth_mm: String(r.thickness_mm),
     pos_offset_mm: String(r.pos.z),
+    pos_x_mm: String(r.pos.x),
+    pos_y_mm: String(r.pos.y),
+    pos_z_mm: String(r.pos.z),
   }));
 }
 
@@ -58,6 +62,7 @@ export function ImportShell({ panels }: Props) {
   const [parseError, setParseError] = useState<string | null>(null);
   const [result, setResult] = useState<ParseResult | null>(null);
   const [filename, setFilename] = useState("");
+  const [fileSource, setFileSource] = useState<"dxf" | "3ds">("3ds");
 
   // Editable cabinet-level state
   const [cabinetName, setCabinetName] = useState("");
@@ -75,19 +80,30 @@ export function ImportShell({ panels }: Props) {
   // ── file pick ──────────────────────────────────────────────────────
 
   const handleFile = useCallback(async (file: File) => {
-    if (!file.name.toLowerCase().endsWith(".dxf")) {
-      setParseError("Please choose a .dxf file.");
+    const lname = file.name.toLowerCase();
+    const is3ds = lname.endsWith(".3ds");
+    const isDxf = lname.endsWith(".dxf");
+    if (!is3ds && !isDxf) {
+      setParseError("Please choose a .3ds or .dxf file.");
       return;
     }
     setParsing(true);
     setParseError(null);
     setResult(null);
     setSaved(false);
+    setFileSource(is3ds ? "3ds" : "dxf");
 
     try {
-      const text = await file.text();
-      const { parsePolyboardDxf } = await import("@/lib/dxf/polyboardImport");
-      const res = await parsePolyboardDxf(text);
+      let res: ParseResult;
+      if (is3ds) {
+        const buf = await file.arrayBuffer();
+        const { parse3ds } = await import("@/lib/3ds/threeDsImport");
+        res = parse3ds(buf);
+      } else {
+        const text = await file.text();
+        const { parsePolyboardDxf } = await import("@/lib/dxf/polyboardImport");
+        res = await parsePolyboardDxf(text);
+      }
 
       setResult(res);
       setFilename(file.name);
@@ -162,7 +178,7 @@ export function ImportShell({ panels }: Props) {
         depth_mm: D || null,
         is_active: true,
         is_template: true,
-        source: "polyboard_dxf",
+        source: fileSource === "3ds" ? "polyboard_3ds" : "polyboard_dxf",
         source_filename: filename,
       })
       .select("id")
@@ -190,6 +206,9 @@ export function ImportShell({ panels }: Props) {
       part_role: (r.editedRole || r.part_role) || null,
       depth_mm: r.thickness_mm || null,
       pos_offset_mm: r.pos.z || null,
+      pos_x_mm: r.pos.x || null,
+      pos_y_mm: r.pos.y || null,
+      pos_z_mm: r.pos.z || null,
       hole_count: r.holeCount,
       holes_json: r.holes.length > 0 ? r.holes : null,
     }));
@@ -218,6 +237,17 @@ export function ImportShell({ panels }: Props) {
   const bomForPreview = result
     ? toBomLineState(rows, parseFloat(cabinetD) || 0)
     : [];
+
+  // For .3ds imports, derive real-position panels from rows (with editedRole applied)
+  const rawPanels3D: RawPanel3D[] | undefined = fileSource === "3ds" && result
+    ? rows.map(r => ({
+        part_role:    r.editedRole || r.part_role,
+        width_mm:     r.width_mm,
+        height_mm:    r.height_mm,
+        thickness_mm: r.thickness_mm,
+        pos:          r.pos,
+      }))
+    : undefined;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -248,7 +278,7 @@ export function ImportShell({ panels }: Props) {
         <input
           ref={fileRef}
           type="file"
-          accept=".dxf"
+          accept=".3ds,.dxf"
           className="hidden"
           onChange={onFileChange}
         />
@@ -324,6 +354,7 @@ export function ImportShell({ panels }: Props) {
             cabinetHeight={parseFloat(cabinetH) || 0}
             cabinetDepth={parseFloat(cabinetD) || 0}
             parts={bomForPreview}
+            rawPanels={rawPanels3D}
           />
 
           {/* Panels table */}
