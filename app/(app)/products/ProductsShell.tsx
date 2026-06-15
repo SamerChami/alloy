@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Plus, Pencil, ExternalLink, FileUp } from "lucide-react";
+import { Search, Plus, Pencil, ExternalLink, FileUp, Box } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { PageTitle } from "@/components/ui/blocks";
 import { jod } from "@/lib/utils";
@@ -212,6 +212,13 @@ export function ProductsShell({
             >
               <FileUp size={16} />
               {t("importDxf")}
+            </button>
+            <button
+              className="btn-ghost flex items-center gap-2"
+              onClick={() => router.push("/products/import-sketchup")}
+            >
+              <Box size={16} />
+              {t("importSketchup")}
             </button>
             <button
               className="btn-primary flex items-center gap-2"

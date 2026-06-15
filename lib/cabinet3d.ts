@@ -49,7 +49,7 @@ function m(v: number): number {
   return v / 1000;
 }
 
-function inferRole(partName: string): PartRole {
+export function inferRole(partName: string): PartRole {
   const n = partName.toLowerCase();
   if (n.includes("left")) return "side_left";
   if (n.includes("right")) return "side_right";
