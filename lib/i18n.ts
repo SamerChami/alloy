@@ -206,6 +206,8 @@ export const dict = {
     skuSelectAll:          "Select all",
     skuDeselectAll:        "Deselect all",
     skuImportNote:         "Fittings are detected and shown but not imported yet. Panels start unmapped (JD 0) — assign materials in the BOM to price each cabinet.",
+    skuClickRowToPreview:  "Click a row to preview in 3D",
+    skuPanelBreakdown:     "Panel breakdown",
   },
   ar: {
     appName: "ALLOY",
@@ -408,6 +410,8 @@ export const dict = {
     skuSelectAll:          "تحديد الكل",
     skuDeselectAll:        "إلغاء التحديد",
     skuImportNote:         "المستلزمات مكتشفة وتظهر لكنها غير مستوردة بعد. الألواح تبدأ غير مرتبطة (JD 0) — عيّن المواد في قائمة المواد لتسعير كل خزانة.",
+    skuClickRowToPreview:  "انقر على صف لمعاينة ثلاثية الأبعاد",
+    skuPanelBreakdown:     "تفاصيل الألواح",
   },
 } as const;
 

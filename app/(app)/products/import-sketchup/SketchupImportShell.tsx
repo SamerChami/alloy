@@ -2,10 +2,17 @@
 
 import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { Upload, AlertTriangle, ChevronLeft, CheckCircle } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
+import type { RawPanel3D } from "@/lib/cabinet3d";
+
+const Cabinet3D = dynamic(
+  () => import("@/components/Cabinet3D").then(m => ({ default: m.Cabinet3D })),
+  { ssr: false, loading: () => <div className="h-[400px] border border-line rounded-lg" /> },
+);
 
 // ── JSON schema types ─────────────────────────────────────────────────
 
@@ -43,6 +50,49 @@ type CabinetRow = {
   selected: boolean;
 };
 
+// ── helpers ───────────────────────────────────────────────────────────
+
+// Correct H/W/T using sorted_mm: thickness=smallest, width=middle, height=largest.
+// sorted_mm is ascending [t, w, h] — use it directly instead of raw rotated extents.
+function correctedDims(panel: SkuPanel) {
+  const s = panel.sorted_mm;
+  return { thickness: s[0], width: s[1], height: s[2] };
+}
+
+// Build RawPanel3D[] from a SkuItem for 3D preview.
+// SketchUp is Z-up: x=width, y=depth, z=height.
+// App convention (Three.js Y-up): x=width, y=height, z=depth.
+function buildRawPanels(item: SkuItem): RawPanel3D[] {
+  const panels: RawPanel3D[] = item.panels.map(panel => {
+    const { thickness, width, height } = correctedDims(panel);
+    return {
+      part_role: inferRole(panel.name),
+      width_mm: width,
+      height_mm: height,
+      thickness_mm: thickness,
+      pos: {
+        x: panel.pos_mm.x,  // SketchUp X = width → app X
+        y: panel.pos_mm.z,  // SketchUp Z = up/height → app Y
+        z: panel.pos_mm.y,  // SketchUp Y = depth → app Z
+      },
+    };
+  });
+
+  // Translate so the minimum panel center sits at origin, placing cabinet near (0,0,0).
+  if (panels.length > 0) {
+    const minX = Math.min(...panels.map(p => p.pos.x));
+    const minY = Math.min(...panels.map(p => p.pos.y));
+    const minZ = Math.min(...panels.map(p => p.pos.z));
+    for (const p of panels) {
+      p.pos.x -= minX;
+      p.pos.y -= minY;
+      p.pos.z -= minZ;
+    }
+  }
+
+  return panels;
+}
+
 // ── component ─────────────────────────────────────────────────────────
 
 export function SketchupImportShell() {
@@ -58,6 +108,7 @@ export function SketchupImportShell() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{ cabinets: number; panels: number } | null>(null);
   const [progress, setProgress] = useState("");
+  const [previewIdx, setPreviewIdx] = useState(0);
 
   const handleFile = useCallback(async (file: File) => {
     setParseError(null);
@@ -65,6 +116,7 @@ export function SketchupImportShell() {
     setRows([]);
     setImportResult(null);
     setImportError(null);
+    setPreviewIdx(0);
 
     if (!file.name.toLowerCase().endsWith(".json")) {
       setParseError(t("skuInvalidFile"));
@@ -160,26 +212,29 @@ export function SketchupImportShell() {
       }
 
       if (item.panels.length > 0) {
-        const bomRows = item.panels.map((panel, i) => ({
-          product_id: prod.id,
-          line_type: "panel",
-          panel_id: null,
-          part_name: panel.name,
-          width_mm: panel.width_mm,
-          height_mm: panel.height_mm,
-          banding_type_id: null,
-          banded_length_m: 0,
-          component_id: null,
-          qty: 1,
-          sort_order: i,
-          part_role: inferRole(panel.name),
-          depth_mm: panel.depth_mm,
-          pos_offset_mm: null,
-          pos_x_mm: panel.pos_mm.x,
-          pos_y_mm: panel.pos_mm.y,
-          pos_z_mm: panel.pos_mm.z,
-          hole_count: 0,
-        }));
+        const bomRows = item.panels.map((panel, i) => {
+          const { thickness, width, height } = correctedDims(panel);
+          return {
+            product_id: prod.id,
+            line_type: "panel",
+            panel_id: null,
+            part_name: panel.name,
+            width_mm: width,
+            height_mm: height,
+            banding_type_id: null,
+            banded_length_m: 0,
+            component_id: null,
+            qty: 1,
+            sort_order: i,
+            part_role: inferRole(panel.name),
+            depth_mm: thickness,
+            pos_offset_mm: null,
+            pos_x_mm: panel.pos_mm.x,
+            pos_y_mm: panel.pos_mm.y,
+            pos_z_mm: panel.pos_mm.z,
+            hole_count: 0,
+          };
+        });
 
         const { error: e2 } = await supabase.from("bom_lines").insert(bomRows);
         if (e2) {
@@ -204,6 +259,9 @@ export function SketchupImportShell() {
   const skippedTypes = parsed?.summary
     ? Object.entries(parsed.summary).filter(([type]) => type !== "Cabinet")
     : [];
+
+  const previewItem = rows[previewIdx]?.item ?? null;
+  const rawPanels3D = previewItem ? buildRawPanels(previewItem) : undefined;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -294,13 +352,16 @@ export function SketchupImportShell() {
             </p>
           </div>
 
-          {/* Cabinet table */}
+          {/* Cabinet table — click a row to focus 3D preview; checkbox toggles import */}
           <div className="border border-line rounded-lg overflow-hidden">
-            <div className="bg-mist px-4 py-2.5 border-b border-line flex items-center justify-between gap-3">
+            <div className="bg-mist px-4 py-2.5 border-b border-line flex items-center justify-between gap-3 flex-wrap">
               <span className="text-sm font-semibold">
                 {t("skuCabinetsLabel")} ({rows.length})
               </span>
               <div className="flex items-center gap-2">
+                <span className="text-xs text-slate hidden sm:inline">
+                  {t("skuClickRowToPreview")}
+                </span>
                 <button
                   type="button"
                   className="btn-ghost text-xs py-1 px-2"
@@ -332,10 +393,12 @@ export function SketchupImportShell() {
                   {rows.map((row, idx) => (
                     <tr
                       key={idx}
-                      className={`border-b border-line last:border-0 hover:bg-mist/30 cursor-pointer transition-opacity ${
-                        !row.selected ? "opacity-40" : ""
-                      }`}
-                      onClick={() => toggleRow(idx)}
+                      className={`border-b border-line last:border-0 cursor-pointer transition-colors ${
+                        idx === previewIdx
+                          ? "bg-brass/10 hover:bg-brass/15"
+                          : "hover:bg-mist/30"
+                      } ${!row.selected ? "opacity-40" : ""}`}
+                      onClick={() => setPreviewIdx(idx)}
                     >
                       <td className="px-3 py-2 text-center">
                         <input
@@ -371,6 +434,62 @@ export function SketchupImportShell() {
               </table>
             </div>
           </div>
+
+          {/* 3D preview for focused cabinet */}
+          {previewItem && (
+            <>
+              <p className="text-sm font-semibold">
+                {t("preview3d")} —{" "}
+                <span className="font-mono font-normal text-slate">{previewItem.name}</span>
+              </p>
+              <Cabinet3D
+                cabinetWidth={previewItem.overall_mm.w}
+                cabinetHeight={previewItem.overall_mm.h}
+                cabinetDepth={previewItem.overall_mm.d}
+                parts={[]}
+                rawPanels={rawPanels3D}
+              />
+
+              {/* Panel breakdown — verify corrected T/W/H */}
+              <div className="border border-line rounded-lg overflow-hidden">
+                <div className="bg-mist px-4 py-2 border-b border-line">
+                  <span className="text-sm font-semibold">
+                    {t("skuPanelBreakdown")}
+                    <span className="text-slate font-normal ms-2">
+                      — {previewItem.name} ({previewItem.panels.length})
+                    </span>
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-line text-slate">
+                        <th className="text-start px-3 py-2 font-medium">{t("partName")}</th>
+                        <th className="text-start px-3 py-2 font-medium">{t("roleLabel")}</th>
+                        <th className="text-end px-3 py-2 font-medium">T (mm)</th>
+                        <th className="text-end px-3 py-2 font-medium">W (mm)</th>
+                        <th className="text-end px-3 py-2 font-medium">H (mm)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewItem.panels.map((panel, i) => {
+                        const { thickness, width, height } = correctedDims(panel);
+                        return (
+                          <tr key={i} className="border-b border-line last:border-0 hover:bg-mist/20">
+                            <td className="px-3 py-1.5 font-mono">{panel.name}</td>
+                            <td className="px-3 py-1.5 text-slate">{inferRole(panel.name)}</td>
+                            <td className="px-3 py-1.5 text-end tabular-nums">{Math.round(thickness)}</td>
+                            <td className="px-3 py-1.5 text-end tabular-nums">{Math.round(width)}</td>
+                            <td className="px-3 py-1.5 text-end tabular-nums">{Math.round(height)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Notes */}
           <div className="text-xs text-slate space-y-1 border-l-2 border-line ps-3">
