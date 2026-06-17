@@ -3,9 +3,9 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { Maximize2, X } from "lucide-react";
-import { buildCabinetBoxes, buildBoxesFromRawPanels } from "@/lib/cabinet3d";
+import { buildCabinetBoxes, buildBoxesFromRawPanels, buildBoxesFromSkuPanels } from "@/lib/cabinet3d";
 import { useLang } from "@/components/lang-provider";
-import type { PartRole, RawPanel3D } from "@/lib/cabinet3d";
+import type { PartRole, RawPanel3D, SkuPanel3D } from "@/lib/cabinet3d";
 import type { BomLineState } from "@/app/(app)/products/bom_types";
 
 type Props = {
@@ -13,6 +13,9 @@ type Props = {
   cabinetHeight: number;
   cabinetDepth: number;
   parts: BomLineState[];
+  /** SketchUp import: raw per-axis extents + world positions (preferred over rawPanels). */
+  skuPanels?: SkuPanel3D[];
+  /** .3ds import: sorted T/W/H extents + remapped positions. */
   rawPanels?: RawPanel3D[];
   /** True when this instance is already rendered inside the modal — hides expand, shows X. */
   inModal?: boolean;
@@ -40,6 +43,7 @@ export function Cabinet3D({
   cabinetHeight,
   cabinetDepth,
   parts,
+  skuPanels,
   rawPanels,
   inModal = false,
   onClose,
@@ -198,7 +202,9 @@ export function Cabinet3D({
       const cH = cabinetHeight > 0 ? cabinetHeight : 720;
       const cD = cabinetDepth  > 0 ? cabinetDepth  : 580;
 
-      const boxes = rawPanels && rawPanels.length > 0
+      const boxes = skuPanels && skuPanels.length > 0
+        ? buildBoxesFromSkuPanels(skuPanels, showDoors, explode)
+        : rawPanels && rawPanels.length > 0
         ? buildBoxesFromRawPanels(rawPanels, showDoors, explode)
         : buildCabinetBoxes(
             cW, cH, cD,
@@ -259,7 +265,7 @@ export function Cabinet3D({
     }, 150);
 
     return () => clearTimeout(tid);
-  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, rawPanels, showDoors, explode, viewMode, updateCamera]);
+  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, skuPanels, rawPanels, showDoors, explode, viewMode, updateCamera]);
 
   // ── pointer handlers ──────────────────────────────────────────────────
   // Left (0) → PAN    Middle (1) / Right (2) → ORBIT
@@ -410,6 +416,7 @@ export function Cabinet3D({
               cabinetHeight={cabinetHeight}
               cabinetDepth={cabinetDepth}
               parts={parts}
+              skuPanels={skuPanels}
               rawPanels={rawPanels}
               inModal
               onClose={() => setModalOpen(false)}

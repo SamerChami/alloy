@@ -262,6 +262,78 @@ export function buildCabinetBoxes(
   return boxes;
 }
 
+// Raw SketchUp panel: per-axis extents in SketchUp world coords (NOT sorted cut-list dims).
+// su_width_mm  = extent along SU X axis
+// su_height_mm = extent along SU Y axis
+// su_depth_mm  = extent along SU Z axis (vertical in SketchUp)
+export type SkuPanel3D = {
+  part_role: PartRole | string;
+  su_width_mm:  number;
+  su_height_mm: number;
+  su_depth_mm:  number;
+  pos: { x: number; y: number; z: number }; // SketchUp world-space center
+};
+
+// Build Box3D from real SketchUp panel data using raw per-axis extents + true positions.
+// SketchUp is Z-up: SU X→three X, SU Y→three Z (depth), SU Z→three Y (vertical/up).
+// Min-corner is subtracted so the assembled cabinet sits at origin.
+export function buildBoxesFromSkuPanels(
+  panels: SkuPanel3D[],
+  showDoors = true,
+  explode = false,
+): Box3D[] {
+  if (panels.length === 0) return [];
+  const E = EXPLODE_M;
+
+  // Apply Z-up axis swap to every panel:
+  //   three X size  = su_width_mm   (SU X extent)
+  //   three Y size  = su_depth_mm   (SU Z extent → vertical)
+  //   three Z size  = su_height_mm  (SU Y extent → depth)
+  //   three X ctr   = pos.x
+  //   three Y ctr   = pos.z         (SU Z → up)
+  //   three Z ctr   = pos.y         (SU Y → depth)
+  const mapped = panels.map(p => ({
+    role: (p.part_role || "other") as PartRole,
+    bw: m(p.su_width_mm),
+    bh: m(p.su_depth_mm),
+    bd: m(p.su_height_mm),
+    cx: m(p.pos.x),
+    cy: m(p.pos.z),
+    cz: m(p.pos.y),
+  }));
+
+  // AABB min-corner across all panels → shift so the cabinet starts at origin
+  const minX = Math.min(...mapped.map(p => p.cx - p.bw / 2));
+  const minY = Math.min(...mapped.map(p => p.cy - p.bh / 2));
+  const minZ = Math.min(...mapped.map(p => p.cz - p.bd / 2));
+
+  const boxes: Box3D[] = [];
+  for (const p of mapped) {
+    const { role } = p;
+    if ((role === "door" || role === "drawer_front") && !showDoors) continue;
+
+    let x = p.cx - minX;
+    let y = p.cy - minY;
+    let z = p.cz - minZ;
+
+    if (explode) {
+      switch (role) {
+        case "side_left":    x -= E;     break;
+        case "side_right":   x += E;     break;
+        case "top":          y += E;     break;
+        case "bottom":       y -= E;     break;
+        case "back":         z -= E;     break;
+        case "door":
+        case "drawer_front": z += E * 2; break;
+      }
+    }
+
+    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role });
+  }
+
+  return boxes;
+}
+
 // Build Box3D array from real assembled panel positions (e.g. from .3ds import).
 // Uses role-based axis assignment to map sorted extents (T/W/H) to THREE.js w/h/d.
 export function buildBoxesFromRawPanels(

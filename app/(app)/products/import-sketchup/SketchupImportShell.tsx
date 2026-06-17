@@ -7,7 +7,7 @@ import { Upload, AlertTriangle, ChevronLeft, CheckCircle } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
-import type { RawPanel3D } from "@/lib/cabinet3d";
+import type { SkuPanel3D } from "@/lib/cabinet3d";
 
 const Cabinet3D = dynamic(
   () => import("@/components/Cabinet3D").then(m => ({ default: m.Cabinet3D })),
@@ -57,40 +57,6 @@ type CabinetRow = {
 function correctedDims(panel: SkuPanel) {
   const s = panel.sorted_mm;
   return { thickness: s[0], width: s[1], height: s[2] };
-}
-
-// Build RawPanel3D[] from a SkuItem for 3D preview.
-// SketchUp is Z-up: x=width, y=depth, z=height.
-// App convention (Three.js Y-up): x=width, y=height, z=depth.
-function buildRawPanels(item: SkuItem): RawPanel3D[] {
-  const panels: RawPanel3D[] = item.panels.map(panel => {
-    const { thickness, width, height } = correctedDims(panel);
-    return {
-      part_role: inferRole(panel.name),
-      width_mm: width,
-      height_mm: height,
-      thickness_mm: thickness,
-      pos: {
-        x: panel.pos_mm.x,  // SketchUp X = width → app X
-        y: panel.pos_mm.z,  // SketchUp Z = up/height → app Y
-        z: panel.pos_mm.y,  // SketchUp Y = depth → app Z
-      },
-    };
-  });
-
-  // Translate so the minimum panel center sits at origin, placing cabinet near (0,0,0).
-  if (panels.length > 0) {
-    const minX = Math.min(...panels.map(p => p.pos.x));
-    const minY = Math.min(...panels.map(p => p.pos.y));
-    const minZ = Math.min(...panels.map(p => p.pos.z));
-    for (const p of panels) {
-      p.pos.x -= minX;
-      p.pos.y -= minY;
-      p.pos.z -= minZ;
-    }
-  }
-
-  return panels;
 }
 
 // ── component ─────────────────────────────────────────────────────────
@@ -261,7 +227,18 @@ export function SketchupImportShell() {
     : [];
 
   const previewItem = rows[previewIdx]?.item ?? null;
-  const rawPanels3D = previewItem ? buildRawPanels(previewItem) : undefined;
+
+  // Build SkuPanel3D[] from raw JSON panel data — axis mapping happens inside buildBoxesFromSkuPanels.
+  // We pass raw per-axis extents (NOT sorted cut-list dims) so the 3D uses true orientation.
+  const skuPanels3D: SkuPanel3D[] | undefined = previewItem
+    ? previewItem.panels.map(panel => ({
+        part_role:    inferRole(panel.name),
+        su_width_mm:  panel.width_mm,
+        su_height_mm: panel.height_mm,
+        su_depth_mm:  panel.depth_mm,
+        pos:          panel.pos_mm,
+      }))
+    : undefined;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -447,7 +424,7 @@ export function SketchupImportShell() {
                 cabinetHeight={previewItem.overall_mm.h}
                 cabinetDepth={previewItem.overall_mm.d}
                 parts={[]}
-                rawPanels={rawPanels3D}
+                skuPanels={skuPanels3D}
               />
 
               {/* Panel breakdown — verify corrected T/W/H */}
