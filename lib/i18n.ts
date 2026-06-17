@@ -208,6 +208,8 @@ export const dict = {
     skuImportNote:         "Fittings are detected and shown but not imported yet. Panels start unmapped (JD 0) — assign materials in the BOM to price each cabinet.",
     skuClickRowToPreview:  "Click a row to preview in 3D",
     skuPanelBreakdown:     "Panel breakdown",
+    viewShaded:            "Shaded",
+    viewWireframe:         "Wireframe",
   },
   ar: {
     appName: "ALLOY",
@@ -412,6 +414,8 @@ export const dict = {
     skuImportNote:         "المستلزمات مكتشفة وتظهر لكنها غير مستوردة بعد. الألواح تبدأ غير مرتبطة (JD 0) — عيّن المواد في قائمة المواد لتسعير كل خزانة.",
     skuClickRowToPreview:  "انقر على صف لمعاينة ثلاثية الأبعاد",
     skuPanelBreakdown:     "تفاصيل الألواح",
+    viewShaded:            "مظلّل",
+    viewWireframe:         "هيكلي",
   },
 } as const;
 

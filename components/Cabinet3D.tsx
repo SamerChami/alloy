@@ -12,9 +12,10 @@ type Props = {
   cabinetHeight: number;
   cabinetDepth: number;
   parts: BomLineState[];
-  // When provided, use real assembled positions instead of role synthesis.
   rawPanels?: RawPanel3D[];
 };
+
+type ViewMode = "shaded" | "wireframe";
 
 const ROLE_COLOR: Record<PartRole, number> = {
   side_left:     0xCECBC5,
@@ -40,29 +41,33 @@ export function Cabinet3D({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // THREE refs — never trigger re-renders
-  const rendererRef  = useRef<THREE.WebGLRenderer | null>(null);
-  const sceneRef     = useRef<THREE.Scene | null>(null);
-  const cameraRef    = useRef<THREE.PerspectiveCamera | null>(null);
-  const groupRef     = useRef<THREE.Group | null>(null);
-  const rafRef       = useRef<number>(0);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef    = useRef<THREE.Scene | null>(null);
+  const cameraRef   = useRef<THREE.PerspectiveCamera | null>(null);
+  const groupRef    = useRef<THREE.Group | null>(null);
+  const rafRef      = useRef<number>(0);
 
-  // Orbit state
+  // Orbit/pan state lives entirely in a ref — no re-render on camera movement
   const orbitRef = useRef({
-    dragging: false,
-    lastX: 0,
-    lastY: 0,
-    theta: Math.PI * 0.75,
-    phi: Math.PI / 3,
+    theta:  Math.PI * 0.75,
+    phi:    Math.PI / 3,
     radius: 2,
-    cx: 0,
-    cy: 0,
-    cz: 0,
+    cx: 0, cy: 0, cz: 0,
+  });
+
+  // Active pointer drag state
+  const dragRef = useRef({
+    active: false,
+    button: -1,   // 0=left(pan), 1=middle/2=right(rotate)
+    lastX:  0,
+    lastY:  0,
   });
 
   const [showDoors, setShowDoors] = useState(true);
   const [explode,   setExplode]   = useState(false);
+  const [viewMode,  setViewMode]  = useState<ViewMode>("shaded");
 
-  // Stable camera update (reads from refs only)
+  // Stable camera update — reads from refs only
   const updateCamera = useCallback(() => {
     const cam = cameraRef.current;
     if (!cam) return;
@@ -75,7 +80,7 @@ export function Cabinet3D({
     cam.lookAt(cx, cy, cz);
   }, []);
 
-  // ── mount: create scene, renderer, lights, animation loop ──────────
+  // ── mount: scene, renderer, lights, animation loop, native listeners ──
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -94,26 +99,18 @@ export function Cabinet3D({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W, H);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;   // PCFSoft is deprecated in r168+
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Soft ambient base so all faces are visible
-    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-    scene.add(ambient);
-
-    // Hemisphere gives warm-top / cool-bottom gradient that reads depth on flat panels
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
     const hemi = new THREE.HemisphereLight(0xfff4e8, 0xd4c8b8, 0.6);
     scene.add(hemi);
-
-    // Key light from front-top-right
     const dir = new THREE.DirectionalLight(0xffffff, 0.9);
     dir.position.set(2, 4, 3);
     dir.castShadow = true;
     dir.shadow.mapSize.set(1024, 1024);
     scene.add(dir);
-
-    // Subtle fill from back-left so rear/side faces aren't pitch black
     const fill = new THREE.DirectionalLight(0xffffff, 0.25);
     fill.position.set(-2, 1, -2);
     scene.add(fill);
@@ -139,9 +136,25 @@ export function Cabinet3D({
     });
     ro.observe(container);
 
+    // Non-passive wheel listener so preventDefault() works (React makes onWheel passive)
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      const o = orbitRef.current;
+      o.radius = Math.max(0.1, Math.min(20, o.radius + e.deltaY * 0.0008));
+      updateCamera();
+    }
+    container.addEventListener("wheel", onWheel, { passive: false });
+
+    // Suppress browser context menu so right-drag can rotate without interruption
+    function onContextMenu(e: Event) { e.preventDefault(); }
+    container.addEventListener("contextmenu", onContextMenu);
+
     return () => {
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
+      container.removeEventListener("wheel", onWheel);
+      container.removeEventListener("contextmenu", onContextMenu);
       disposeGroup(group);
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
@@ -152,9 +165,9 @@ export function Cabinet3D({
       cameraRef.current   = null;
       groupRef.current    = null;
     };
-  }, []); // mount only
+  }, [updateCamera]);
 
-  // ── update meshes whenever parts / dims / options change (debounced) ─
+  // ── rebuild meshes on geometry / option / view-mode changes ──────────
   useEffect(() => {
     const tid = setTimeout(() => {
       const group = groupRef.current;
@@ -167,8 +180,6 @@ export function Cabinet3D({
       const cH = cabinetHeight > 0 ? cabinetHeight : 720;
       const cD = cabinetDepth  > 0 ? cabinetDepth  : 580;
 
-      // Use real assembled positions when available (e.g. from .3ds import);
-      // fall back to role-synthesis when rawPanels is absent (BOM editor path).
       const boxes = rawPanels && rawPanels.length > 0
         ? buildBoxesFromRawPanels(rawPanels, showDoors, explode)
         : buildCabinetBoxes(
@@ -189,80 +200,110 @@ export function Cabinet3D({
             explode,
           );
 
+      const isWireframe = viewMode === "wireframe";
+
       for (const box of boxes) {
         const geo = new THREE.BoxGeometry(box.w, box.h, box.d);
         const isDoor = box.role === "door" || box.role === "drawer_front";
-        const mat = new THREE.MeshStandardMaterial({
-          color:       ROLE_COLOR[box.role] ?? 0xD9D5CE,
-          roughness:   0.8,
-          metalness:   0.02,
-          // Doors are semi-transparent so interior shelves show through
-          transparent: isDoor,
-          opacity:     isDoor ? 0.88 : 1.0,
-        });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.set(box.x, box.y, box.z);
-        mesh.castShadow    = true;
-        mesh.receiveShadow = true;
-        group.add(mesh);
 
-        // Edge outlines ensure thin panels (backs, trays, doors) read as solid boards
-        const edgesGeo = new THREE.EdgesGeometry(geo);
-        const edgesMat = new THREE.LineBasicMaterial({ color: 0x5a5a52 });
-        mesh.add(new THREE.LineSegments(edgesGeo, edgesMat));
+        if (isWireframe) {
+          // Wireframe: only edge outlines, coloured by role for readability
+          const edgesGeo = new THREE.EdgesGeometry(geo);
+          const edgesMat = new THREE.LineBasicMaterial({
+            color: ROLE_COLOR[box.role] ?? 0x888880,
+          });
+          const lines = new THREE.LineSegments(edgesGeo, edgesMat);
+          lines.position.set(box.x, box.y, box.z);
+          group.add(lines);
+          geo.dispose(); // BoxGeometry no longer needed after edges are built
+        } else {
+          // Shaded: solid panel + dark edge outlines
+          const mat = new THREE.MeshStandardMaterial({
+            color:       ROLE_COLOR[box.role] ?? 0xD9D5CE,
+            roughness:   0.8,
+            metalness:   0.02,
+            transparent: isDoor,
+            opacity:     isDoor ? 0.88 : 1.0,
+          });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.position.set(box.x, box.y, box.z);
+          mesh.castShadow    = true;
+          mesh.receiveShadow = true;
+          group.add(mesh);
+
+          const edgesGeo = new THREE.EdgesGeometry(geo);
+          const edgesMat = new THREE.LineBasicMaterial({ color: 0x5a5a52 });
+          mesh.add(new THREE.LineSegments(edgesGeo, edgesMat));
+        }
       }
 
-      // Re-center orbit on cabinet bounding box
-      const orbit = orbitRef.current;
-      orbit.cx     = cW / 1000 / 2;
-      orbit.cy     = cH / 1000 / 2;
-      orbit.cz     = cD / 1000 / 2;
-      // phi=0.4π ≈ 72° from top — more front-facing angle for tall cabinets
-      orbit.phi    = Math.PI * 0.4;
-      orbit.radius = Math.max(cW, cH, cD) / 1000 * 2.0;
+      // Re-centre orbit on cabinet bounding box
+      const orbit   = orbitRef.current;
+      orbit.cx      = cW / 1000 / 2;
+      orbit.cy      = cH / 1000 / 2;
+      orbit.cz      = cD / 1000 / 2;
+      orbit.phi     = Math.PI * 0.4;
+      orbit.radius  = Math.max(cW, cH, cD) / 1000 * 2.0;
       updateCamera();
     }, 150);
 
     return () => clearTimeout(tid);
-  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, rawPanels, showDoors, explode, updateCamera]);
+  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, rawPanels, showDoors, explode, viewMode, updateCamera]);
 
-  // ── mouse orbit ────────────────────────────────────────────────────
-  function onMouseDown(e: React.MouseEvent) {
-    orbitRef.current.dragging = true;
-    orbitRef.current.lastX = e.clientX;
-    orbitRef.current.lastY = e.clientY;
+  // ── pointer handlers ─────────────────────────────────────────────────
+  // Left (button 0) → PAN   |   Middle (1) / Right (2) → ROTATE
+
+  function onPointerDown(e: React.PointerEvent) {
+    (e.target as Element).setPointerCapture(e.pointerId);
+    dragRef.current = { active: true, button: e.button, lastX: e.clientX, lastY: e.clientY };
   }
 
-  function onMouseMove(e: React.MouseEvent) {
-    const o = orbitRef.current;
-    if (!o.dragging) return;
-    const dx = e.clientX - o.lastX;
-    const dy = e.clientY - o.lastY;
-    o.lastX = e.clientX;
-    o.lastY = e.clientY;
-    o.theta -= dx * 0.008;
-    o.phi    = Math.max(0.08, Math.min(Math.PI - 0.08, o.phi + dy * 0.008));
+  function onPointerMove(e: React.PointerEvent) {
+    const drag = dragRef.current;
+    if (!drag.active) return;
+
+    const dx = e.clientX - drag.lastX;
+    const dy = e.clientY - drag.lastY;
+    drag.lastX = e.clientX;
+    drag.lastY = e.clientY;
+
+    if (drag.button === 0) {
+      // Left drag → PAN along camera's right / up axes
+      const cam = cameraRef.current;
+      const o   = orbitRef.current;
+      if (!cam) return;
+      cam.updateMatrixWorld();
+      const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+      const up    = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
+      const speed = o.radius * 0.0015;
+      o.cx += (-right.x * dx + up.x * dy) * speed;
+      o.cy += (-right.y * dx + up.y * dy) * speed;
+      o.cz += (-right.z * dx + up.z * dy) * speed;
+    } else {
+      // Middle or right drag → ORBIT
+      const o = orbitRef.current;
+      o.theta -= dx * 0.008;
+      o.phi    = Math.max(0.08, Math.min(Math.PI - 0.08, o.phi + dy * 0.008));
+    }
+
     updateCamera();
   }
 
-  function onMouseUp() {
-    orbitRef.current.dragging = false;
-  }
-
-  function onWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    const o = orbitRef.current;
-    o.radius = Math.max(0.15, o.radius + e.deltaY * 0.0008);
-    updateCamera();
+  function onPointerUp(e: React.PointerEvent) {
+    (e.target as Element).releasePointerCapture(e.pointerId);
+    dragRef.current.active = false;
   }
 
   function resetView() {
-    const o = orbitRef.current;
+    const o  = orbitRef.current;
     const cW = cabinetWidth  > 0 ? cabinetWidth  : 800;
     const cH = cabinetHeight > 0 ? cabinetHeight : 720;
     const cD = cabinetDepth  > 0 ? cabinetDepth  : 580;
-    o.theta  = Math.PI * 0.75;     // 3/4 front-left angle
-    o.phi    = Math.PI * 0.4;      // 72° from top — upright tall-cabinet view
+    o.cx     = cW / 1000 / 2;
+    o.cy     = cH / 1000 / 2;
+    o.cz     = cD / 1000 / 2;
+    o.theta  = Math.PI * 0.75;
+    o.phi    = Math.PI * 0.4;
     o.radius = Math.max(cW, cH, cD) / 1000 * 2.0;
     updateCamera();
   }
@@ -293,18 +334,31 @@ export function Cabinet3D({
         >
           {t("showDoors")}
         </button>
+        <span className="w-px h-4 bg-line mx-1" />
+        <button
+          type="button"
+          className={`btn-ghost text-xs py-1 px-2${viewMode === "shaded" ? " text-brass font-semibold" : ""}`}
+          onClick={() => setViewMode("shaded")}
+        >
+          {t("viewShaded")}
+        </button>
+        <button
+          type="button"
+          className={`btn-ghost text-xs py-1 px-2${viewMode === "wireframe" ? " text-brass font-semibold" : ""}`}
+          onClick={() => setViewMode("wireframe")}
+        >
+          {t("viewWireframe")}
+        </button>
       </div>
 
-      {/* Canvas container */}
+      {/* Canvas */}
       <div
         ref={containerRef}
         style={{ height: 400 }}
         className="w-full select-none cursor-grab active:cursor-grabbing"
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={onMouseUp}
-        onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
       />
     </div>
   );
