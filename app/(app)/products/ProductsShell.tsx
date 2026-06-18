@@ -215,10 +215,17 @@ export function ProductsShell({
             </button>
             <button
               className="btn-ghost flex items-center gap-2"
-              onClick={() => router.push("/products/import-sketchup")}
+              onClick={() => router.push("/products/import-sketchup-single")}
             >
               <Box size={16} />
-              {t("importSketchup")}
+              {t("skuImportSingle")}
+            </button>
+            <button
+              className="btn-ghost flex items-center gap-2"
+              onClick={() => router.push("/products/import-sketchup-project")}
+            >
+              <Box size={16} />
+              {t("skuImportProject")}
             </button>
             <button
               className="btn-primary flex items-center gap-2"
