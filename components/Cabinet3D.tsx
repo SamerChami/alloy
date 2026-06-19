@@ -7,6 +7,7 @@ import { buildCabinetBoxes, buildBoxesFromRawPanels, buildBoxesFromSkuPanels } f
 import { useLang } from "@/components/lang-provider";
 import type { PartRole, RawPanel3D, SkuPanel3D } from "@/lib/cabinet3d";
 import type { BomLineState } from "@/app/(app)/products/bom_types";
+import type { Cut } from "@/lib/sketchup/types";
 
 type Props = {
   cabinetWidth: number;
@@ -70,6 +71,7 @@ export function Cabinet3D({
   const dragRef = useRef({ active: false, button: -1, lastX: 0, lastY: 0 });
 
   const [showDoors, setShowDoors] = useState(true);
+  const [showCuts,  setShowCuts]  = useState(true);
   const [explode,   setExplode]   = useState(false);
   const [viewMode,  setViewMode]  = useState<ViewMode>("shaded");
   const [modalOpen, setModalOpen] = useState(false);
@@ -247,6 +249,9 @@ export function Cabinet3D({
           lines.position.set(box.x, box.y, box.z);
           group.add(lines);
           geo.dispose();
+          if (showCuts && box.cuts && box.cuts.length > 0) {
+            addCutMeshes(lines, box.cuts, box.w, box.h, box.d, true);
+          }
         } else {
           const mat = new THREE.MeshStandardMaterial({
             color:       ROLE_COLOR[box.role] ?? 0xD9D5CE,
@@ -262,6 +267,9 @@ export function Cabinet3D({
           group.add(mesh);
           const edgesGeo = new THREE.EdgesGeometry(geo);
           mesh.add(new THREE.LineSegments(edgesGeo, new THREE.LineBasicMaterial({ color: 0x5a5a52 })));
+          if (showCuts && box.cuts && box.cuts.length > 0) {
+            addCutMeshes(mesh, box.cuts, box.w, box.h, box.d, false);
+          }
         }
       }
 
@@ -275,7 +283,7 @@ export function Cabinet3D({
     }, 150);
 
     return () => clearTimeout(tid);
-  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, skuPanels, rawPanels, showDoors, explode, viewMode, updateCamera]);
+  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, skuPanels, rawPanels, showDoors, showCuts, explode, viewMode, updateCamera]);
 
   // ── pointer handlers ──────────────────────────────────────────────────
   // Left (0) → PAN    Middle (1) / Right (2) → ORBIT
@@ -354,6 +362,13 @@ export function Cabinet3D({
         onClick={() => setShowDoors(v => !v)}
       >
         {t("showDoors")}
+      </button>
+      <button
+        type="button"
+        className={`btn-ghost text-xs py-1 px-2${!showCuts ? " text-slate" : ""}`}
+        onClick={() => setShowCuts(v => !v)}
+      >
+        {t("showCuts")}
       </button>
       <span className="w-px h-4 bg-line mx-1" />
       <button
@@ -439,6 +454,75 @@ export function Cabinet3D({
 }
 
 // ── helpers ───────────────────────────────────────────────────────────
+
+// Adds dark inset recess boxes to a panel mesh for each cut.
+// Box3D axes: w=THREE X=su_width_mm, h=THREE Y=su_depth_mm, d=THREE Z=su_height_mm.
+// u/v assignment determined by which SketchUp source axis is thickness (smallest):
+//   thickness=su_width(X):  u→su_height=Z(d), v→su_depth=Y(h)
+//   thickness=su_depth(Y):  u→su_width=X(w),  v→su_height=Z(d)
+//   thickness=su_height(Z): u→su_width=X(w),  v→su_depth=Y(h)
+// Verified: Left_Side w=18(thk)→u=Z,v=Y → groove at u[518,527] reads VERTICAL. ✓
+function addCutMeshes(
+  parent: THREE.Object3D,
+  cuts: Cut[],
+  bw: number, bh: number, bd: number,
+  wireframe: boolean,
+) {
+  type Axis3 = "x" | "y" | "z";
+  let tAxis: Axis3, uAxis: Axis3, vAxis: Axis3;
+  if (bw <= bh && bw <= bd)      { tAxis = "x"; uAxis = "z"; vAxis = "y"; }
+  else if (bh <= bw && bh <= bd) { tAxis = "y"; uAxis = "x"; vAxis = "z"; }
+  else                            { tAxis = "z"; uAxis = "x"; vAxis = "y"; }
+
+  const axisVal = (a: Axis3) => a === "x" ? bw : a === "y" ? bh : bd;
+  const thickness = axisVal(tAxis);
+  const uExtent   = axisVal(uAxis);
+  const vExtent   = axisVal(vAxis);
+
+  for (const cut of cuts) {
+    const uCtr  = (cut.u_min_mm + cut.u_max_mm) / 2 / 1000;
+    const vCtr  = (cut.v_min_mm + cut.v_max_mm) / 2 / 1000;
+    const uSize = (cut.u_max_mm - cut.u_min_mm) / 1000;
+    const vSize = (cut.v_max_mm - cut.v_min_mm) / 1000;
+    const depth = cut.depth_mm / 1000;
+
+    const sz: Record<Axis3, number> = { x: 0, y: 0, z: 0 };
+    sz[uAxis] = uSize;
+    sz[vAxis] = vSize;
+    sz[tAxis] = depth;
+
+    function drawFace(side: "front" | "back") {
+      const pos: Record<Axis3, number> = { x: 0, y: 0, z: 0 };
+      pos[uAxis] = uCtr - uExtent / 2;
+      pos[vAxis] = vCtr - vExtent / 2;
+      // face="front" means the groove floor is closer to t_min (Ruby: min distance).
+      // The groove OPENS from the opposite face (t_max side). Show the recess at
+      // the opening face so it is visible from the correct side.
+      pos[tAxis] = side === "front"
+        ?  thickness / 2 - depth / 2
+        : -thickness / 2 + depth / 2;
+
+      const geo = new THREE.BoxGeometry(sz.x, sz.y, sz.z);
+      if (wireframe) {
+        const eg = new THREE.EdgesGeometry(geo);
+        const ls = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x555555 }));
+        ls.position.set(pos.x, pos.y, pos.z);
+        parent.add(ls);
+        geo.dispose();
+      } else {
+        const mat  = new THREE.MeshStandardMaterial({ color: 0x8A857C, roughness: 0.9, metalness: 0 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(pos.x, pos.y, pos.z);
+        parent.add(mesh);
+        const eg = new THREE.EdgesGeometry(geo);
+        mesh.add(new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x4A4A42 })));
+      }
+    }
+
+    if (cut.face === "front" || cut.face === "both") drawFace("front");
+    if (cut.face === "back"  || cut.face === "both") drawFace("back");
+  }
+}
 
 function disposeGroup(group: THREE.Group) {
   group.traverse(obj => {
