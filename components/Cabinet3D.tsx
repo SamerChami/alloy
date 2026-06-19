@@ -227,8 +227,18 @@ export function Cabinet3D({
       const isWireframe = viewMode === "wireframe";
 
       for (const box of boxes) {
-        const geo    = new THREE.BoxGeometry(box.w, box.h, box.d);
         const isDoor = box.role === "door" || box.role === "drawer_front";
+        const name   = box.part_name ?? "";
+
+        // Use smart fitting shape when the part name identifies a known fitting type
+        if (fittingColor(name) !== null) {
+          const obj = buildFittingObject(name, box.w, box.h, box.d, isWireframe);
+          obj.position.set(box.x, box.y, box.z);
+          group.add(obj);
+          continue;
+        }
+
+        const geo = new THREE.BoxGeometry(box.w, box.h, box.d);
 
         if (isWireframe) {
           const edgesGeo = new THREE.EdgesGeometry(geo);
@@ -439,4 +449,123 @@ function disposeGroup(group: THREE.Group) {
       else (mat as THREE.Material)?.dispose();
     }
   });
+}
+
+// Returns a hex color for known fitting types, or null if not a recognised fitting.
+function fittingColor(name: string): number | null {
+  const n = name.toLowerCase();
+  if (n.includes("leg"))       return 0x3a3a3a; // dark grey plastic
+  if (n.includes("p2o"))       return 0x555555; // push-to-open plunger, dark grey
+  if (n.includes("l_channel")) return 0x8A9BA8; // aluminium channel
+  if (n.includes("u_channel")) return 0x8A9BA8; // aluminium channel
+  // Other recognisable fitting names → subtle hardware colour, box shape
+  if (n.includes("hinge") || n.includes("atira") || n.includes("basket") ||
+      n.includes("fitting") || n.includes("handle") || n.includes("clip") ||
+      n.includes("screw") || n.includes("cam") || n.includes("dowel")) {
+    return 0xA0A8B0;
+  }
+  return null;
+}
+
+function longestAxis(w: number, h: number, d: number): "x" | "y" | "z" {
+  if (w >= h && w >= d) return "x";
+  if (h >= w && h >= d) return "y";
+  return "z";
+}
+
+// Adds a geometry as a mesh+edges (shaded) or wireframe LineSegments into a group.
+function addPartToGroup(
+  g: THREE.Group,
+  geo: THREE.BufferGeometry,
+  color: number,
+  wireframe: boolean,
+  x = 0, y = 0, z = 0,
+) {
+  if (wireframe) {
+    const eg  = new THREE.EdgesGeometry(geo);
+    const seg = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color }));
+    seg.position.set(x, y, z);
+    g.add(seg);
+    geo.dispose();
+  } else {
+    const mat  = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.25 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    mesh.castShadow    = true;
+    mesh.receiveShadow = true;
+    const eg = new THREE.EdgesGeometry(geo);
+    mesh.add(new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x222222 })));
+    g.add(mesh);
+  }
+}
+
+// Returns a THREE.Group representing the custom fitting shape, centred at origin.
+function buildFittingObject(
+  name: string,
+  w: number, h: number, d: number,
+  wireframe: boolean,
+): THREE.Group {
+  const n     = name.toLowerCase();
+  const color = fittingColor(name) ?? 0xA0A8B0;
+  const g     = new THREE.Group();
+
+  // ── Cylinder: legs and push-to-open plungers ────────────────────────
+  if (n.includes("leg") || n.includes("p2o")) {
+    const r = Math.min(w, d) / 2;
+    addPartToGroup(g, new THREE.CylinderGeometry(r, r, h, 20), color, wireframe);
+    return g;
+  }
+
+  // ── L_Channel / U_Channel: profile extruded along longest axis ──────
+  if (n.includes("l_channel") || n.includes("u_channel")) {
+    const la = longestAxis(w, h, d);
+
+    // The two cross-section dimensions (b = mid, c = short)
+    let extrLen: number, b: number, c: number;
+    if (la === "x") { extrLen = w; b = h; c = d; }
+    else if (la === "y") { extrLen = h; b = w; c = d; }
+    else { extrLen = d; b = w; c = h; }
+
+    // Arm thickness: proportion of shortest cross-section dimension
+    const t = Math.max(Math.min(b, c) * 0.28, 0.002);
+
+    // Build boxes in the XZ, XY, or ZY cross-section plane depending on la.
+    // We always build: web (full b, thin c extent) + bottom flange (thin b, full c extent)
+    // and for U also top flange.
+    if (la === "x") {
+      // Extrude along X. Cross-section in YZ.
+      // Web: full h in Y, thin (t) in Z, at back (Z = -d/2 + t/2)
+      addPartToGroup(g, new THREE.BoxGeometry(extrLen, b, t),     color, wireframe, 0, 0,        -c / 2 + t / 2);
+      // Bottom flange: thin (t) in Y, full d in Z, at bottom (Y = -h/2 + t/2)
+      addPartToGroup(g, new THREE.BoxGeometry(extrLen, t, c),     color, wireframe, 0, -b/2+t/2, 0);
+      if (n.includes("u_channel")) {
+        // Top flange
+        addPartToGroup(g, new THREE.BoxGeometry(extrLen, t, c),   color, wireframe, 0, b/2-t/2,  0);
+      }
+    } else if (la === "y") {
+      // Extrude along Y. Cross-section in XZ.
+      // Web: thin (t) in X, full d in Z, at left (X = -w/2 + t/2)
+      addPartToGroup(g, new THREE.BoxGeometry(t, extrLen, c),     color, wireframe, -b/2+t/2, 0, 0);
+      // Bottom flange: full w in X, thin (t) in Z, at back (Z = -d/2 + t/2)
+      addPartToGroup(g, new THREE.BoxGeometry(b, extrLen, t),     color, wireframe, 0,        0, -c/2+t/2);
+      if (n.includes("u_channel")) {
+        addPartToGroup(g, new THREE.BoxGeometry(b, extrLen, t),   color, wireframe, 0,        0, c/2-t/2);
+      }
+    } else {
+      // Extrude along Z. Cross-section in XY.
+      // Web: thin (t) in X, full h in Y, at left (X = -w/2 + t/2)
+      addPartToGroup(g, new THREE.BoxGeometry(t, b, extrLen),     color, wireframe, -c/2+t/2, 0,        0);
+      // Bottom flange: full w in X, thin (t) in Y, at bottom (Y = -h/2 + t/2)
+      addPartToGroup(g, new THREE.BoxGeometry(c, t, extrLen),     color, wireframe, 0,        -b/2+t/2, 0);
+      if (n.includes("u_channel")) {
+        addPartToGroup(g, new THREE.BoxGeometry(c, t, extrLen),   color, wireframe, 0,        b/2-t/2,  0);
+      }
+    }
+
+    return g;
+  }
+
+  // ── Default: plain box with hardware colour ──────────────────────────
+  addPartToGroup(g, new THREE.BoxGeometry(w, h, d), color, wireframe);
+  return g;
 }

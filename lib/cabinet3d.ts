@@ -31,6 +31,7 @@ export type Box3D = {
   y: number;
   z: number;
   role: PartRole;
+  part_name?: string;
 };
 
 // Minimal panel shape for real-position 3D rendering (satisfied by ImportedPanel).
@@ -268,6 +269,7 @@ export function buildCabinetBoxes(
 // su_depth_mm  = extent along SU Z axis (vertical in SketchUp)
 export type SkuPanel3D = {
   part_role: PartRole | string;
+  part_name?: string;
   su_width_mm:  number;
   su_height_mm: number;
   su_depth_mm:  number;
@@ -294,6 +296,7 @@ export function buildBoxesFromSkuPanels(
   //   three Z ctr   = pos.y         (SU Y → depth)
   const mapped = panels.map(p => ({
     role: (p.part_role || "other") as PartRole,
+    part_name: p.part_name,
     bw: m(p.su_width_mm),
     bh: m(p.su_depth_mm),
     bd: m(p.su_height_mm),
@@ -328,7 +331,7 @@ export function buildBoxesFromSkuPanels(
       }
     }
 
-    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role });
+    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name });
   }
 
   return boxes;

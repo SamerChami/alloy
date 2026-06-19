@@ -205,6 +205,7 @@ export function ProjectImportShell() {
         const { panels, fittings } = cabinetToParts(previewRoot);
         return [...panels, ...fittings].map((part) => ({
           part_role: inferRole(part.name),
+          part_name: part.name,
           su_width_mm:  part.size.x,
           su_height_mm: part.size.y,
           su_depth_mm:  part.size.z,

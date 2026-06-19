@@ -233,6 +233,7 @@ export function SketchupImportShell() {
   const skuPanels3D: SkuPanel3D[] | undefined = previewItem
     ? previewItem.panels.map(panel => ({
         part_role:    inferRole(panel.name),
+        part_name:    panel.name,
         su_width_mm:  panel.width_mm,
         su_height_mm: panel.height_mm,
         su_depth_mm:  panel.depth_mm,
