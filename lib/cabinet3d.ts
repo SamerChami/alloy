@@ -1,3 +1,5 @@
+import type { Cut } from "@/lib/sketchup/types";
+
 export const PART_ROLES = [
   "side_left",
   "side_right",
@@ -32,6 +34,7 @@ export type Box3D = {
   z: number;
   role: PartRole;
   part_name?: string;
+  cuts?: Cut[];
 };
 
 // Minimal panel shape for real-position 3D rendering (satisfied by ImportedPanel).
@@ -274,6 +277,7 @@ export type SkuPanel3D = {
   su_height_mm: number;
   su_depth_mm:  number;
   pos: { x: number; y: number; z: number }; // SketchUp world-space center
+  cuts?: Cut[];
 };
 
 // Build Box3D from real SketchUp panel data using raw per-axis extents + true positions.
@@ -303,6 +307,7 @@ export function buildBoxesFromSkuPanels(
     cx: m(p.pos.x),
     cy: m(p.pos.z),
     cz: m(p.pos.y),
+    cuts: p.cuts,
   }));
 
   // AABB min-corner across all panels → shift so the cabinet starts at origin
@@ -331,7 +336,7 @@ export function buildBoxesFromSkuPanels(
       }
     }
 
-    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name });
+    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name, cuts: p.cuts });
   }
 
   return boxes;

@@ -174,6 +174,7 @@ export function SingleImportShell() {
     su_height_mm: part.size.y,
     su_depth_mm:  part.size.z,
     pos: part.pos,
+    cuts: part.cuts,
   }));
 
   const dims = parsed ? rootDims(parsed.roots[0]) : null;
