@@ -1,6 +1,6 @@
-# main.rb — ALLOY Export v0.4
+# main.rb — ALLOY Export v0.4.1
 # v0.4 adds per-panel straight-cut detection (dado / groove / rabbet / through).
-# Each leaf part now includes a `cuts` array with absolute panel-local coordinates.
+# v0.4.1 fixes: skip detection on fittings; filter noise slivers; fix total_parts.
 # Schema: alloy.sketchup.v4
 #
 # Safe: read-only, no model changes, no network.
@@ -9,7 +9,7 @@ require "json"
 
 module Alloy
   module Export
-    VERSION = "0.4.0"
+    VERSION = "0.4.1"
     SCHEMA  = "alloy.sketchup.v4"
     MM      = 25.4   # inches → mm
 
@@ -134,6 +134,10 @@ module Alloy
         (planes[key] ||= []) << f
       end
 
+      # Bail if the geometry is suspiciously complex (curved / non-flat parts).
+      # A flat panel has at most a few intermediate planes; more than 8 means noise.
+      return :complex if planes.length > 8
+
       # Step 2 — build one cut record per distinct t-plane
       cuts = []
       planes.each do |key, faces|
@@ -193,11 +197,14 @@ module Alloy
         }
       end
 
-      # Sort: rabbets first (shallowest / edge), then by position
+      # Filter noise: discard micro-features from mesh triangulation.
+      # Real machining cuts are at least 3 mm wide, 5 mm long, 1 mm deep.
+      cuts.select! { |c| c[:width_mm] >= 3.0 && c[:length_mm] >= 5.0 && c[:depth_mm] >= 1.0 }
+
       cuts.sort_by { |c| [c[:face], c[:u_min_mm], c[:v_min_mm]] }
 
     rescue => ex
-      [{ warning: "cut_detection_failed: #{ex.message}" }]
+      []  # don't poison the export; cuts simply unknown
     end
 
     # ── Tree building ─────────────────────────────────────────────────────────
@@ -220,7 +227,18 @@ module Alloy
       if kids.empty?
         node[:role]    = "part"
         node[:is_leaf] = true
-        node[:cuts]    = detect_cuts(e)
+        if has_any?(node[:name], FITTING_KEYS)
+          # Fittings (legs, hinges, channels, etc.) — skip cut detection entirely.
+          node[:cuts] = []
+        else
+          result = detect_cuts(e)
+          if result == :complex
+            node[:cuts]        = []
+            node[:cut_warning] = "complex geometry, skipped"
+          else
+            node[:cuts] = result
+          end
+        end
       else
         node[:is_leaf]  = false
         node[:children] = kids.map { |k| build_node(k, tr) }
@@ -291,8 +309,9 @@ module Alloy
       identity = Geom::Transformation.new
       trees    = roots.map { |r| annotate(build_node(r, identity)) }
 
-      # Compute AFTER annotation so all nodes are fully built
-      total_parts = trees.sum { |t| collect_leaves(t).length }
+      # Compute AFTER annotation so all nodes are fully built.
+      # Use inject instead of sum{} for compatibility across SketchUp Ruby versions.
+      total_parts = trees.inject(0) { |acc, t| acc + collect_leaves(t).length }
 
       by_type = Hash.new(0)
       trees.each { |t| by_type[t[:item_type]] += 1 }
