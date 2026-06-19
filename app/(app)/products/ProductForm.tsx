@@ -15,7 +15,7 @@ import {
 import type { TKey } from "@/lib/i18n";
 import dynamic from "next/dynamic";
 import { BomSection, newBomKey, emptyPanelLine, emptyComponentLine } from "./BomSection";
-import type { BomLineState, PanelOption, ComponentOption, BandingType } from "./bom_types";
+import type { BomLineState, PanelOption, ComponentOption, BandingType, Cut } from "./bom_types";
 import type { Product } from "./types";
 import type { RawPanel3D } from "@/lib/cabinet3d";
 
@@ -87,6 +87,9 @@ function dbLineToBomState(row: Record<string, unknown>): BomLineState {
     pos_x_mm: row.pos_x_mm != null ? String(row.pos_x_mm) : "",
     pos_y_mm: row.pos_y_mm != null ? String(row.pos_y_mm) : "",
     pos_z_mm: row.pos_z_mm != null ? String(row.pos_z_mm) : "",
+    // v4 cut data: parse jsonb back to typed array; undefined when column is null (v3 source)
+    cuts: row.cuts_json != null ? (row.cuts_json as Cut[]) : undefined,
+    cutWarning: (row.cut_warning as string | null) ?? undefined,
   };
 }
 
@@ -148,8 +151,15 @@ export function ProductForm({
       .eq("product_id", product.id)
       .order("sort_order")
       .then(({ data }) => {
-        setBomLines((data ?? []).map(dbLineToBomState));
+        const lines = (data ?? []).map(dbLineToBomState);
+        setBomLines(lines);
         setLoadingBom(false);
+        // debug: report how many cuts were loaded (remove after 8b ships)
+        const cutsTotal = lines.reduce((n, l) => n + (l.cuts?.length ?? 0), 0);
+        const panelsWithCuts = lines.filter((l) => (l.cuts?.length ?? 0) > 0).length;
+        if (cutsTotal > 0) {
+          console.debug(`[cuts] ${cutsTotal} cuts across ${panelsWithCuts} panels`);
+        }
       });
   }, [product?.id]);
 

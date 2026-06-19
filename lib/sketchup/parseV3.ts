@@ -1,5 +1,25 @@
-// SketchUp v3 JSON schema types and helpers.
-// v3 exports nested component trees; leaves (is_leaf:true) are the actual panels/fittings.
+// SketchUp v3/v4 JSON schema types and helpers.
+// v3/v4 export nested component trees; leaves (is_leaf:true) are the actual panels/fittings.
+// v4 adds per-leaf `cuts[]` and optional `cut_warning`; top-level `total_parts` and `version`.
+
+import type { Cut } from "./types";
+export type { Cut };
+
+// ── Schema validation ────────────────────────────────────────────────────────
+
+const SUPPORTED_SCHEMAS = [
+  "alloy.sketchup.v3",
+  "alloy.sketchup.v4",
+] as const;
+
+export type SupportedSchema = (typeof SUPPORTED_SCHEMAS)[number];
+
+/** Returns true for any schema version the app can ingest (v3 or v4). */
+export function isSupportedSchema(s: unknown): s is SupportedSchema {
+  return SUPPORTED_SCHEMAS.includes(s as SupportedSchema);
+}
+
+// ── JSON tree types ───────────────────────────────────────────────────────────
 
 export type V3Node = {
   name: string;
@@ -11,16 +31,23 @@ export type V3Node = {
   panel_count?: number;
   fitting_count?: number;
   children?: V3Node[];
+  // v4 fields (leaves only)
+  cuts?: Cut[];
+  cut_warning?: string;
 };
 
 export type V3Json = {
-  schema: "alloy.sketchup.v3";
+  schema: SupportedSchema;
+  version?: string;        // e.g. "0.4.1" (present from v0.4+)
   model: string;
   units: string;
   root_count: number;
+  total_parts?: number;    // present from v0.4.1+; null/absent in older exports
   summary: Record<string, number>;
   roots: V3Node[];
 };
+
+// ── Part type (output of cabinetToParts) ─────────────────────────────────────
 
 export type V3Part = {
   name: string;
@@ -30,7 +57,13 @@ export type V3Part = {
   // ascending [thickness, width, height] for cut-list
   sorted: [number, number, number];
   isFitting: boolean;
+  // v4: defined (even if empty []) when the export carried cut data.
+  // undefined means the source file was v3 (no cut data at all).
+  cuts?: Cut[];
+  cutWarning?: string;
 };
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const FITTING_KEYWORDS = [
   "p2o", "leg_", "atira", "hafele", "basket",
@@ -64,6 +97,9 @@ export function cabinetToParts(root: V3Node): { panels: V3Part[]; fittings: V3Pa
       pos: leaf.pos_mm,
       sorted: leaf.sorted_mm,
       isFitting: isFittingByName(leaf.name),
+      // carry v4 cut data; leave undefined when absent (v3 source)
+      cuts: leaf.cuts,
+      cutWarning: leaf.cut_warning,
     };
     if (part.isFitting) fittings.push(part);
     else panels.push(part);

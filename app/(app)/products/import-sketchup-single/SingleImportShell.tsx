@@ -14,6 +14,7 @@ import {
   cabinetToParts,
   cutListDims,
   rootDims,
+  isSupportedSchema,
 } from "@/lib/sketchup/parseV3";
 
 const Cabinet3D = dynamic(
@@ -56,7 +57,7 @@ export function SingleImportShell() {
         const text = await file.text();
         const json = JSON.parse(text) as V3Json;
 
-        if (json.schema !== "alloy.sketchup.v3" || !Array.isArray(json.roots) || json.roots.length === 0) {
+        if (!isSupportedSchema(json.schema) || !Array.isArray(json.roots) || json.roots.length === 0) {
           setParseError(t("skuInvalidFileV3"));
           return;
         }
@@ -113,6 +114,7 @@ export function SingleImportShell() {
         is_template: true,
         source: "sketchup_json",
         source_filename: parsed.model,
+        export_version: parsed.version ?? null,
       })
       .select("id")
       .single();
@@ -145,6 +147,9 @@ export function SingleImportShell() {
           pos_y_mm: part.pos.y,
           pos_z_mm: part.pos.z,
           hole_count: 0,
+          // v4: persist cut data; null when source was v3 (no cut data at all)
+          cuts_json: part.cuts !== undefined ? part.cuts : null,
+          cut_warning: part.cutWarning ?? null,
         };
       });
 

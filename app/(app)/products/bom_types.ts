@@ -24,6 +24,9 @@ export type ComponentOption = {
   unit_price_jod: number;
 };
 
+import type { Cut } from "@/lib/sketchup/types";
+export type { Cut };
+
 export type BomLineState = {
   _key: string;
   id?: string;
@@ -44,4 +47,7 @@ export type BomLineState = {
   pos_x_mm?: string;
   pos_y_mm?: string;
   pos_z_mm?: string;
+  // v4 cut data (undefined = not yet ingested / v3 source; [] = ingested, 0 cuts)
+  cuts?: Cut[];
+  cutWarning?: string;
 };
