@@ -61,7 +61,7 @@ export function Cabinet3D({
 
   // Orbit/pan state — all in a ref so camera moves never cause re-renders
   const orbitRef = useRef({
-    theta:  Math.PI * 0.75,
+    theta:  Math.PI * 1.75,
     phi:    Math.PI * 0.4,
     radius: 2,
     cx: 0, cy: 0, cz: 0,
@@ -235,6 +235,16 @@ export function Cabinet3D({
         // Use smart fitting shape when the part name identifies a known fitting type
         if (fittingColor(name) !== null) {
           const obj = buildFittingObject(name, box.w, box.h, box.d, isWireframe);
+          if (box.orient) {
+            const m = new THREE.Matrix4();
+            m.set(
+              box.orient[0], box.orient[3], box.orient[6], 0,
+              box.orient[1], box.orient[4], box.orient[7], 0,
+              box.orient[2], box.orient[5], box.orient[8], 0,
+              0, 0, 0, 1,
+            );
+            obj.quaternion.setFromRotationMatrix(m);
+          }
           obj.position.set(box.x, box.y, box.z);
           group.add(obj);
           continue;
@@ -246,11 +256,24 @@ export function Cabinet3D({
           const edgesGeo = new THREE.EdgesGeometry(geo);
           const edgesMat = new THREE.LineBasicMaterial({ color: ROLE_COLOR[box.role] ?? 0x888880 });
           const lines    = new THREE.LineSegments(edgesGeo, edgesMat);
+          if (box.orient) {
+            const om = new THREE.Matrix4();
+            om.set(
+              box.orient[0], box.orient[3], box.orient[6], 0,
+              box.orient[1], box.orient[4], box.orient[7], 0,
+              box.orient[2], box.orient[5], box.orient[8], 0,
+              0, 0, 0, 1,
+            );
+            lines.quaternion.setFromRotationMatrix(om);
+            lines.updateMatrix();
+          }
           lines.position.set(box.x, box.y, box.z);
           group.add(lines);
           geo.dispose();
           if (showCuts && box.cuts && box.cuts.length > 0) {
-            addCutMeshes(lines, box.cuts, box.w, box.h, box.d, true);
+            addCutMeshes(lines, box.cuts, box.w, box.h, box.d, true,
+              { x: box.x, y: box.y, z: box.z },
+              { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 });
           }
         } else {
           const mat = new THREE.MeshStandardMaterial({
@@ -261,6 +284,17 @@ export function Cabinet3D({
             opacity:     isDoor ? 0.88 : 1.0,
           });
           const mesh = new THREE.Mesh(geo, mat);
+          if (box.orient) {
+            const om = new THREE.Matrix4();
+            om.set(
+              box.orient[0], box.orient[3], box.orient[6], 0,
+              box.orient[1], box.orient[4], box.orient[7], 0,
+              box.orient[2], box.orient[5], box.orient[8], 0,
+              0, 0, 0, 1,
+            );
+            mesh.quaternion.setFromRotationMatrix(om);
+            mesh.updateMatrix();
+          }
           mesh.position.set(box.x, box.y, box.z);
           mesh.castShadow    = true;
           mesh.receiveShadow = true;
@@ -268,7 +302,9 @@ export function Cabinet3D({
           const edgesGeo = new THREE.EdgesGeometry(geo);
           mesh.add(new THREE.LineSegments(edgesGeo, new THREE.LineBasicMaterial({ color: 0x5a5a52 })));
           if (showCuts && box.cuts && box.cuts.length > 0) {
-            addCutMeshes(mesh, box.cuts, box.w, box.h, box.d, false);
+            addCutMeshes(mesh, box.cuts, box.w, box.h, box.d, false,
+              { x: box.x, y: box.y, z: box.z },
+              { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 });
           }
         }
       }
@@ -467,6 +503,8 @@ function addCutMeshes(
   cuts: Cut[],
   bw: number, bh: number, bd: number,
   wireframe: boolean,
+  panelCenter: { x: number; y: number; z: number },
+  cabinetCenter: { x: number; y: number; z: number },
 ) {
   type Axis3 = "x" | "y" | "z";
   let tAxis: Axis3, uAxis: Axis3, vAxis: Axis3;
@@ -493,14 +531,19 @@ function addCutMeshes(
 
     function drawFace(side: "front" | "back") {
       const pos: Record<Axis3, number> = { x: 0, y: 0, z: 0 };
-      pos[uAxis] = uCtr - uExtent / 2;
-      pos[vAxis] = vCtr - vExtent / 2;
-      // face="front" means the groove floor is closer to t_min (Ruby: min distance).
-      // The groove OPENS from the opposite face (t_max side). Show the recess at
-      // the opening face so it is visible from the correct side.
-      pos[tAxis] = side === "front"
-        ?  thickness / 2 - depth / 2
-        : -thickness / 2 + depth / 2;
+      // The Stage 8c mirror fix negated the depth axis (three.z = -su.y) for panel
+      // positions, but the cut u/v footprint is still in the original frame. Flip
+      // the placement for whichever face axis maps to three.z so the groove sits at
+      // the correct depth position (e.g. back-seated grooves render at the back).
+      pos[uAxis] = uAxis === "z" ? (uExtent / 2 - uCtr) : (uCtr - uExtent / 2);
+      pos[vAxis] = vAxis === "z" ? (vExtent / 2 - vCtr) : (vCtr - vExtent / 2);
+      // The groove/rabbet always sits on the panel face pointing toward the
+      // cabinet interior. Derive that direction from panel-vs-cabinet center
+      // along the thickness axis (independent of the front/back field).
+      const panelT = tAxis === "x" ? panelCenter.x : tAxis === "y" ? panelCenter.y : panelCenter.z;
+      const cabT   = tAxis === "x" ? cabinetCenter.x : tAxis === "y" ? cabinetCenter.y : cabinetCenter.z;
+      const interiorSign = (cabT - panelT) >= 0 ? 1 : -1;
+      pos[tAxis] = interiorSign * (thickness / 2 - depth / 2);
 
       const geo = new THREE.BoxGeometry(sz.x, sz.y, sz.z);
       if (wireframe) {

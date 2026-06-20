@@ -10,6 +10,7 @@ export type { Cut };
 const SUPPORTED_SCHEMAS = [
   "alloy.sketchup.v3",
   "alloy.sketchup.v4",
+  "alloy.sketchup.v5",
 ] as const;
 
 export type SupportedSchema = (typeof SUPPORTED_SCHEMAS)[number];
@@ -34,6 +35,8 @@ export type V3Node = {
   // v4 fields (leaves only)
   cuts?: Cut[];
   cut_warning?: string;
+  // v5 fields (all nodes)
+  axes?: { x: number[]; y: number[]; z: number[] };
 };
 
 export type V3Json = {
@@ -61,6 +64,8 @@ export type V3Part = {
   // undefined means the source file was v3 (no cut data at all).
   cuts?: Cut[];
   cutWarning?: string;
+  // v5: local axis unit-vectors in SU world space
+  axes?: { x: number[]; y: number[]; z: number[] };
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -100,6 +105,8 @@ export function cabinetToParts(root: V3Node): { panels: V3Part[]; fittings: V3Pa
       // carry v4 cut data; leave undefined when absent (v3 source)
       cuts: leaf.cuts,
       cutWarning: leaf.cut_warning,
+      // carry v5 orientation; leave undefined when absent (v3/v4 source)
+      axes: leaf.axes,
     };
     if (part.isFitting) fittings.push(part);
     else panels.push(part);

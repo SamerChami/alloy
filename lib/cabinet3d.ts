@@ -35,6 +35,7 @@ export type Box3D = {
   role: PartRole;
   part_name?: string;
   cuts?: Cut[];
+  orient?: number[]; // 9 numbers, three-space 3x3 basis (C·Rworld), column-major
 };
 
 // Minimal panel shape for real-position 3D rendering (satisfied by ImportedPanel).
@@ -267,9 +268,9 @@ export function buildCabinetBoxes(
 }
 
 // Raw SketchUp panel: per-axis extents in SketchUp world coords (NOT sorted cut-list dims).
-// su_width_mm  = extent along SU X axis
-// su_height_mm = extent along SU Y axis
-// su_depth_mm  = extent along SU Z axis (vertical in SketchUp)
+// su_width_mm  = extent along SU X axis (local x for v5)
+// su_height_mm = extent along SU Y axis (local y for v5)
+// su_depth_mm  = extent along SU Z axis (local z for v5; vertical in SketchUp world for v3/v4)
 export type SkuPanel3D = {
   part_role: PartRole | string;
   part_name?: string;
@@ -278,7 +279,87 @@ export type SkuPanel3D = {
   su_depth_mm:  number;
   pos: { x: number; y: number; z: number }; // SketchUp world-space center
   cuts?: Cut[];
+  axes?: { x: number[]; y: number[]; z: number[] }; // v5 orientation (local axes in SU world)
 };
+
+// Oriented build path for v5 exports where every panel carries `axes`.
+// Applies the same SU→three basis C = (su.x, su.z, -su.y) to both position and axes,
+// then emits an oriented Box3D so the renderer can apply a full 3×3 rotation matrix.
+function buildBoxesFromOrientedPanels(
+  panels: SkuPanel3D[],
+  showDoors: boolean,
+  explode: boolean,
+): Box3D[] {
+  function Cx(v: number[]): [number, number, number] {
+    return [v[0], v[2], -v[1]];
+  }
+  const E = EXPLODE_M;
+
+  const oriented = panels.map(p => {
+    const role = (p.part_role || "other") as PartRole;
+    const axes = p.axes!;
+    // Local box extents (metres): su_width=local x, su_height=local y, su_depth=local z
+    const bw = m(p.su_width_mm);
+    const bh = m(p.su_height_mm);
+    const bd = m(p.su_depth_mm);
+    // Three-space orientation columns (C applied to each SU local axis)
+    const col0 = Cx(axes.x);
+    const col1 = Cx(axes.y);
+    const col2 = Cx(axes.z);
+    // 9-number column-major basis for Box3D.orient
+    const orient: number[] = [
+      col0[0], col0[1], col0[2],
+      col1[0], col1[1], col1[2],
+      col2[0], col2[1], col2[2],
+    ];
+    // World-space center in three coords
+    const ct = Cx([m(p.pos.x), m(p.pos.y), m(p.pos.z)]);
+    const center = { x: ct[0], y: ct[1], z: ct[2] };
+    // Enumerate 8 local corners in world space for AABB
+    const hW = bw / 2, hH = bh / 2, hD = bd / 2;
+    const corners: { x: number; y: number; z: number }[] = [];
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+      corners.push({
+        x: center.x + col0[0]*sx*hW + col1[0]*sy*hH + col2[0]*sz*hD,
+        y: center.y + col0[1]*sx*hW + col1[1]*sy*hH + col2[1]*sz*hD,
+        z: center.z + col0[2]*sx*hW + col1[2]*sy*hH + col2[2]*sz*hD,
+      });
+    }
+    return { role, part_name: p.part_name, bw, bh, bd, center, orient, corners, cuts: p.cuts };
+  });
+
+  // Global min-corner across all panel AABBs → shift cabinet to origin
+  const allCorners = oriented.flatMap(p => p.corners);
+  const minX = Math.min(...allCorners.map(c => c.x));
+  const minY = Math.min(...allCorners.map(c => c.y));
+  const minZ = Math.min(...allCorners.map(c => c.z));
+
+  const boxes: Box3D[] = [];
+  for (const p of oriented) {
+    const { role } = p;
+    if ((role === "door" || role === "drawer_front") && !showDoors) continue;
+
+    let x = p.center.x - minX;
+    let y = p.center.y - minY;
+    let z = p.center.z - minZ;
+
+    if (explode) {
+      switch (role) {
+        case "side_left":    x -= E;     break;
+        case "side_right":   x += E;     break;
+        case "top":          y += E;     break;
+        case "bottom":       y -= E;     break;
+        case "back":         z -= E;     break;
+        case "door":
+        case "drawer_front": z += E * 2; break;
+      }
+    }
+
+    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name, cuts: p.cuts, orient: p.orient });
+  }
+
+  return boxes;
+}
 
 // Build Box3D from real SketchUp panel data using raw per-axis extents + true positions.
 // SketchUp is Z-up: SU X→three X, SU Y→three Z (depth), SU Z→three Y (vertical/up).
@@ -289,6 +370,10 @@ export function buildBoxesFromSkuPanels(
   explode = false,
 ): Box3D[] {
   if (panels.length === 0) return [];
+  // v5 export: all panels carry axes → use oriented build path
+  if (panels.every(p => p.axes !== undefined)) {
+    return buildBoxesFromOrientedPanels(panels, showDoors, explode);
+  }
   const E = EXPLODE_M;
 
   // Apply Z-up axis swap to every panel:
@@ -306,7 +391,7 @@ export function buildBoxesFromSkuPanels(
     bd: m(p.su_height_mm),
     cx: m(p.pos.x),
     cy: m(p.pos.z),
-    cz: m(p.pos.y),
+    cz: -m(p.pos.y),
     cuts: p.cuts,
   }));
 

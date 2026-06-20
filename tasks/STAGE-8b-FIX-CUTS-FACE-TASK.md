@@ -1,100 +1,68 @@
-# Stage 8b-FIX — Cuts land on the wrong face (per-panel thickness axis) — Claude Code
+# Stage 8b-FIX — Cut recesses render on the wrong big face (Claude Code)
 
-Read `CLAUDE.md`, `components/Cabinet3D.tsx`, `lib/cabinet3d.ts`, and the Stage
-8b cut-rendering code first. 8b draws cuts, but they land on the WRONG FACE for
-several panels (Left/Right sides, DR_Front, Bottom). This is a placement-axis
-bug. Visual-only fix — do NOT touch parsing, dimensions, positions, or data.
+Read `CLAUDE.md` and `components/Cabinet3D.tsx` first. This is a **surgical,
+two-line fix** — do NOT rewrite the file or refactor `addCutMeshes`. A wholesale
+rewrite last time hit `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. Make ONLY the edit below.
 
-## Root cause (VERIFIED against the real export)
-The thickness axis is a DIFFERENT world axis on different panels:
-- Left_Side / Right_Side: size_mm x=18 → **thickness axis = X**
-- Bottom / Top_Back: size_mm z≈18 → **thickness axis = Z**
-- DR_Front: size_mm y=18 → **thickness axis = Y**
+Before starting, in PowerShell:
+`$env:CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000`
+(Switch to `/model sonnet` if the diff still won't apply cleanly.)
 
-A cut's `face` means: recess `depth_mm` into the panel FROM one end of THAT
-panel's own thickness axis:
-- `face==="front"` → from the t=0 end → recess-box center at `depth/2` along the
-  thickness axis (panel-local, origin at min corner).
-- `face==="back"`  → from the t=thickness end → center at `thickness - depth/2`.
-- `face==="both"`  → one box each end.
+## Diagnosis (verified against `alloy_export_0_4_1.json`)
+The cut recesses land on the WRONG big face for Left/Right sides, DR_Front, and
+Bottom. The cause is NOT the axis mapping — the `tAxis/uAxis/vAxis` table in
+`addCutMeshes` is CORRECT for all three thickness cases (verified by matching
+each cut's u/v footprint to the panel's non-thickness extents).
 
-The 8b code is placing the recess offset on a FIXED or WRONG axis (or applying
-the front/back offset on the wrong side, and/or after the Z-up→Y-up swap so the
-direction flips). Because Left(`front`) and Right(`back`) mirror, a sign/axis
-error makes BOTH look wrong in opposite directions — exactly the reported
-symptom.
+The bug is the **front/back offset sign** inside the `drawFace` helper.
 
-## The fix
-1. **Derive the thickness axis PER PANEL** from its RAW `size_mm`: the axis whose
-   extent is the smallest (`sorted_mm[0]`). The other two axes are the face
-   plane (u, v). Do this independently for every panel — never assume a global
-   thickness axis.
-2. Build the recess box in the panel's **local** frame:
-   - extent along thickness axis = `depth_mm`
-   - extents along the two face axes = `(u_max-u_min)` and `(v_max-v_min)`
-   - local center along thickness axis:
-     `face==="front"` → `depth/2`;
-     `face==="back"`  → `thickness - depth/2`;
-     `face==="both"`  → emit two boxes (front + back).
-   - local center along the two face axes = midpoints of u and v.
-   (Origin = panel min corner, consistent with how the export defines u/v.)
-3. **Apply the EXACT SAME transform chain the panel box uses** — the Z-up→Y-up
-   axis map (`three.x=su.x, three.y=su.z, three.z=-su.y`) and the recenter — to
-   the recess box, by composing it in panel-local space and carrying it through
-   the identical mapping. The cut must inherit the panel's full placement so it
-   sits on that panel wherever it is. Do NOT map the cut independently with a
-   hand-written axis order — reuse the panel's transform so front/back can't flip
-   relative to the panel.
-4. Easiest robust implementation: make each cut recess a **child of the panel's
-   mesh/group** (add it in panel-local coordinates BEFORE the panel's world
-   transform is applied), so it automatically inherits position, the axis
-   mapping, recenter, and explode. Then "front/back" is just a local offset along
-   the panel's own thickness axis and cannot land on a different world axis.
+Ruby's cut detector (Stage 7) sets `face: "front"` when the groove FLOOR is
+nearest `t_min` (it uses `depth = min(t, th - t)`, so "front" = the *nearer* big
+face). The recess therefore opens on the `t_min` (`-t/2`) side. The current code
+places `"front"` at `+thickness/2` (the FAR side), so every `face:"front"` cut —
+which is all of them in real exports — renders on the opposite big face. A
+symmetric `face:"both"` groove looks correct by coincidence, which is why the bug
+appeared face-specific.
 
-## Verify against these (must all be correct after fix)
-- **Left_Side** (thick=X, face=front): groove recesses from the x=0 face →
-  on the cabinet-INTERIOR side. Right_Side (thick=X, face=back) mirrors → its
-  groove on its interior side too. The two grooves should FACE EACH OTHER across
-  the cabinet, both vertical near the same edge — not on the outer faces.
-- **Bottom** (thick=Z, face=front): rabbet recesses from the bottom z=0 face,
-  long edge strip — on the correct face, not the top.
-- **DR_Front** (thick=Y, face=front): groove recesses from the y=0 face.
-- **Difference** (thick=Z, both faces present): small recesses appear on BOTH
-  faces.
-- Panels with no cuts unchanged.
+## The fix — in `components/Cabinet3D.tsx`, inside `addCutMeshes` → `drawFace`
 
-If any still mirror wrong, the front/back local offset sign is flipped — fix the
-sign, don't special-case panels.
+**Swap the two offset expressions** for the `tAxis` position:
+
+```diff
+       pos[tAxis] = side === "front"
+-        ?  thickness / 2 - depth / 2
+-        : -thickness / 2 + depth / 2;
++        ? -thickness / 2 + depth / 2
++        :  thickness / 2 - depth / 2;
+```
+
+And replace the now-stale comment directly above that block:
+
+```diff
+-      // face="front" means the groove floor is closer to t_min (Ruby: min distance).
+-      // The groove OPENS from the opposite face (t_max side). Show the recess at
+-      // the opening face so it is visible from the correct side.
++      // Ruby face="front" => groove floor near t_min; the recess opens on the
++      // t_min (-t) side. Place it there so it's visible on the correct big face.
+```
+
+That is the ENTIRE change. Do not touch the `tAxis/uAxis/vAxis` assignment
+table, the `sz`/`pos` u/v placement, geometry/material creation, or anything
+else in the function.
 
 ## Acceptance
-- Side-panel grooves face the cabinet interior and mirror correctly (L=front,
-  R=back), vertical near the edge.
-- Bottom rabbet on the correct (bottom) face; DR_Front groove on the correct
-  face; Difference shows both-face recesses.
-- "Show cuts" toggle, explode, wireframe, modal all still correct.
-- `npm run build` passes. No data/parser/dimension changes.
-- Commit: "Stage 8b-fix: place cut recesses on per-panel thickness axis (correct
-  front/back face)".
+- `npm run build` passes.
+- Re-import the v4 export and view a cabinet: the groove on Left_Side/Right_Side
+  reads as a vertical channel on the INNER face; Bottom's rabbet sits on the
+  correct face; DR_Front's groove is on the correct face. Nothing renders on the
+  opposite (outer) face.
+- Commit: "Stage 8b-fix: cut recess front/back side (correct big face)".
 
-When done: 3-line summary; tell Samer to reopen the v4 cabinet and confirm the
-two side grooves now face each other (interior) and Bottom's rabbet is on the
-bottom face.
+Hard refresh the browser (Ctrl+Shift+R) after rebuild.
 
-## SEPARATE ISSUE — Bottom reads 16.8mm, not 18mm (NOT this task)
-This is NOT a viewer bug. `Bottom#224` is exported with `size_mm.z = 16.8`; every
-other panel is a clean 18.0. The app faithfully shows what the extension
-measured. The 16.8 means that panel's bounding box came out thin in SketchUp —
-most likely the component is slightly off-axis (tilted a hair, so its AABB is
-thinner than the true 18mm board) or it was modeled thin. The cut-list thickness
-for that part will read 16.8 until the source is corrected.
-
-Fix belongs upstream, options for Samer to decide later (do NOT implement now):
-- (a) Correct/realign that panel in the SketchUp model and re-export, OR
-- (b) Add a thickness-snap in the Ruby extension: if a panel's smallest extent is
-  within a tolerance (e.g. ±1.5mm) of a known nominal board thickness
-  (8, 16, 18, 25…), snap `sorted_mm[0]` to the nominal. This would also make
-  cut-lists clean. We'll spec this as a small extension task (Stage 8d) if Samer
-  wants it.
-
-For now: leave the value as-is; this fix task is only about the wrong-face
-rendering.
+## Note to Samer
+The "front = nearer face" semantic is inferred from the Ruby detection algorithm
+(`depth = min(t, th-t)`), not the raw `.rb` source — but it's consistent with all
+cuts in the verified export. After applying, eyeball sides/bottom/DR_Front: if
+they're correct, it's confirmed. If they ALL flip to wrong (unlikely), the
+semantic is reversed and you swap the two lines back.

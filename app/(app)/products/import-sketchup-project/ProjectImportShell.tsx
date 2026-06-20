@@ -216,6 +216,7 @@ export function ProjectImportShell() {
           su_depth_mm:  part.size.z,
           pos: part.pos,
           cuts: part.cuts,
+          axes: part.axes,
         }));
       })()
     : undefined;
