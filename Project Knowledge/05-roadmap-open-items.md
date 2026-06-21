@@ -58,8 +58,15 @@
   Mirrored parts (det −1) handled via Matrix4 from the basis.
 - [x] **9c-fix** Apply v5 orientation to FITTING objects too (channels/legs), so Gola
   profiles place and orient with the panels.
+- [x] **9d** Leg/cylinder fitting orientation fix — radially-symmetric fittings
+  (legs, P2O) now stand UPRIGHT regardless of part orientation. Root cause: viewer
+  built the cylinder height from `size_mm.y` (not the tallest extent) AND applied the
+  panel `orient` basis (which tipped local-Y onto three-Z). Fix: cylinder height =
+  largest extent, and skip `box.orient` for `uprightCylinder` fittings
+  (`isUprightCylinderFitting`). Viewer-only; no schema change. Verified on the corner
+  cabinet — all legs upright.
 - **Result:** the L-shaped base corner cabinet (`BC2.K3.120*120`) renders correctly —
-  both perpendicular legs, doors, shelves, bottom, legs, channels in place.
+  both perpendicular legs, doors, shelves, bottom, upright legs, channels in place.
 
 **Latest artifacts:** `alloy_export_0_5_0.rbz` (schema `alloy.sketchup.v5`,
 version `0.5.0`); verified corner-cabinet export `alloy_export_0_5_0.json`
@@ -69,15 +76,21 @@ version `0.5.0`); verified corner-cabinet export `alloy_export_0_5_0.json`
 
 ## Open Items (next)
 
-### 🟡 Known cosmetic — L_Channel (Gola) foot direction
-The L-channel profile's small L-foot can point the wrong way for one of the two
-run directions. Cause: `buildFittingObject` infers the L cross-section flip from the
-bounding box, which can't recover an asymmetric profile's true orientation. The
-channel PLACEMENT and run-axis are correct; only the foot-flip is cosmetic. Deferred
-(decorative handle profile; no effect on BOM/dimensions/cuts). Fix options when
-revisited: (A) point the foot toward the cabinet interior using the cabinet centre
-(same heuristic as the cut interior-face fix), or (B) export the channel's profile
-orientation from the extension. Likely (A).
+### 🟡 Stage 9e — Panel/profile outline export (mobile shelf L-shape + L_channel foot)
+Two remaining issues share one root cause — the AABB drops the true 2D silhouette:
+1. **Mobile shelf** renders as a full square instead of its real L-shape (notch
+   filled). The part IS L-shaped in SketchUp; `size_mm` only carries the enclosing
+   rectangle, so the viewer's `BoxGeometry` fills the notch.
+2. **L_Channel foot** can point the wrong way for one of the two perpendicular runs.
+   `buildFittingObject` guesses the L-section flip from the bounding box and can't
+   recover an asymmetric profile's true orientation.
+
+**Decision:** export the real outline for ALL panels (uniform; also feeds CNC).
+Add an optional `outline_mm` (local 2D face loop on the two non-thickness axes +
+thickness) to every leaf in the extension → schema bump **v5.1** (purely additive).
+Viewer extrudes the outline via `THREE.Shape` + `ExtrudeGeometry` when present;
+box fallback otherwise. The same outline makes the L_channel foot EXACT (no
+heuristic). This supersedes the earlier "foot heuristic (option A)" plan.
 
 ### 🟡 Migrate older imports to the oriented path (optional)
 The oriented-box path is currently additive (v5 only). Existing v2/v3/v4 imports use
