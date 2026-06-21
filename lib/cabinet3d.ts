@@ -36,6 +36,7 @@ export type Box3D = {
   part_name?: string;
   cuts?: Cut[];
   orient?: number[]; // 9 numbers, three-space 3x3 basis (C·Rworld), column-major
+  uprightCylinder?: boolean; // true for leg/p2o: skip orient, always stand on Y
 };
 
 // Minimal panel shape for real-position 3D rendering (satisfied by ImportedPanel).
@@ -67,6 +68,12 @@ export function inferRole(partName: string): PartRole {
   if (n.includes("divider") || n.includes("partition")) return "divider_v";
   if (n.includes("shelf") || n.includes("shelve")) return "shelf";
   return "other";
+}
+
+// Radially-symmetric fittings that always stand vertical (ignore part orientation).
+export function isUprightCylinderFitting(name: string): boolean {
+  const n = (name || "").toLowerCase();
+  return n.includes("leg") || n.includes("p2o");
 }
 
 export function buildCabinetBoxes(
@@ -355,7 +362,7 @@ function buildBoxesFromOrientedPanels(
       }
     }
 
-    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name, cuts: p.cuts, orient: p.orient });
+    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name, cuts: p.cuts, orient: p.orient, uprightCylinder: isUprightCylinderFitting(p.part_name ?? "") });
   }
 
   return boxes;

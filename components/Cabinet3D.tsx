@@ -235,7 +235,7 @@ export function Cabinet3D({
         // Use smart fitting shape when the part name identifies a known fitting type
         if (fittingColor(name) !== null) {
           const obj = buildFittingObject(name, box.w, box.h, box.d, isWireframe);
-          if (box.orient) {
+          if (box.orient && !box.uprightCylinder) {
             const m = new THREE.Matrix4();
             m.set(
               box.orient[0], box.orient[3], box.orient[6], 0,
@@ -638,8 +638,10 @@ function buildFittingObject(
 
   // ── Cylinder: legs and push-to-open plungers ────────────────────────
   if (n.includes("leg") || n.includes("p2o")) {
-    const r = Math.min(w, d) / 2;
-    addPartToGroup(g, new THREE.CylinderGeometry(r, r, h, 20), color, wireframe);
+    const dims   = [w, h, d].sort((a, b) => a - b); // ascending
+    const height = dims[2];                           // tallest extent = cylinder length
+    const r      = dims[1] / 2;                      // mid extent → radius
+    addPartToGroup(g, new THREE.CylinderGeometry(r, r, height, 20), color, wireframe);
     return g;
   }
 
