@@ -217,6 +217,7 @@ export function ProjectImportShell() {
           pos: part.pos,
           cuts: part.cuts,
           axes: part.axes,
+          outline_mm: part.outline_mm,
         }));
       })()
     : undefined;

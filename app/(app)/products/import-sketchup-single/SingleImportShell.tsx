@@ -176,6 +176,7 @@ export function SingleImportShell() {
     pos: part.pos,
     cuts: part.cuts,
     axes: part.axes,
+    outline_mm: part.outline_mm,
   }));
 
   const dims = parsed ? rootDims(parsed.roots[0]) : null;

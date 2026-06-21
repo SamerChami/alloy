@@ -11,6 +11,7 @@ const SUPPORTED_SCHEMAS = [
   "alloy.sketchup.v3",
   "alloy.sketchup.v4",
   "alloy.sketchup.v5",
+  "alloy.sketchup.v5.1",
 ] as const;
 
 export type SupportedSchema = (typeof SUPPORTED_SCHEMAS)[number];
@@ -37,6 +38,13 @@ export type V3Node = {
   cut_warning?: string;
   // v5 fields (all nodes)
   axes?: { x: number[]; y: number[]; z: number[] };
+  // v5.1 fields (leaves only)
+  outline_mm?: {
+    u_axis: "width" | "height" | "depth";
+    v_axis: "width" | "height" | "depth";
+    thickness_mm: number;
+    loop: [number, number][];
+  };
 };
 
 export type V3Json = {
@@ -66,6 +74,13 @@ export type V3Part = {
   cutWarning?: string;
   // v5: local axis unit-vectors in SU world space
   axes?: { x: number[]; y: number[]; z: number[] };
+  // v5.1: true 2D silhouette for L-shapes etc.
+  outline_mm?: {
+    u_axis: "width" | "height" | "depth";
+    v_axis: "width" | "height" | "depth";
+    thickness_mm: number;
+    loop: [number, number][];
+  };
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -107,6 +122,8 @@ export function cabinetToParts(root: V3Node): { panels: V3Part[]; fittings: V3Pa
       cutWarning: leaf.cut_warning,
       // carry v5 orientation; leave undefined when absent (v3/v4 source)
       axes: leaf.axes,
+      // carry v5.1 outline; leave undefined when absent
+      outline_mm: leaf.outline_mm,
     };
     if (part.isFitting) fittings.push(part);
     else panels.push(part);

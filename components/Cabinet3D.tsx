@@ -250,6 +250,64 @@ export function Cabinet3D({
           continue;
         }
 
+        // Outline extrusion path: use when outline + orient are both present (v5.1+)
+        if (box.outline && box.orient) {
+          const ol        = box.outline;
+          const thickness = ol.thickness_mm / 1000;
+          const uMax      = Math.max(...ol.loop.map(([u]) => u)) / 1000;
+          const vMax      = Math.max(...ol.loop.map(([, v]) => v)) / 1000;
+          const shape     = new THREE.Shape();
+          shape.moveTo(ol.loop[0][0] / 1000, ol.loop[0][1] / 1000);
+          for (let i = 1; i < ol.loop.length; i++) shape.lineTo(ol.loop[i][0] / 1000, ol.loop[i][1] / 1000);
+          shape.closePath();
+          const extGeo = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false });
+          extGeo.translate(-uMax / 2, -vMax / 2, -thickness / 2);
+          // Map shape local axes (X=u, Y=v, Z=thickness) → three-world via orient columns
+          const o     = box.orient;
+          const oC    = [[o[0],o[1],o[2]], [o[3],o[4],o[5]], [o[6],o[7],o[8]]];
+          const aIdx: Record<string, number> = { width: 0, depth: 1, height: 2 };
+          const uI    = aIdx[ol.u_axis];
+          const vI    = aIdx[ol.v_axis];
+          const tI    = [0, 1, 2].find(i => i !== uI && i !== vI)!;
+          const rm    = new THREE.Matrix4();
+          rm.set(
+            oC[uI][0], oC[vI][0], oC[tI][0], 0,
+            oC[uI][1], oC[vI][1], oC[tI][1], 0,
+            oC[uI][2], oC[vI][2], oC[tI][2], 0,
+            0, 0, 0, 1,
+          );
+          if (isWireframe) {
+            const edgesGeo = new THREE.EdgesGeometry(extGeo);
+            const lines    = new THREE.LineSegments(edgesGeo, new THREE.LineBasicMaterial({ color: ROLE_COLOR[box.role] ?? 0x888880 }));
+            lines.quaternion.setFromRotationMatrix(rm);
+            lines.updateMatrix();
+            lines.position.set(box.x, box.y, box.z);
+            group.add(lines);
+            extGeo.dispose();
+            if (showCuts && box.cuts && box.cuts.length > 0) {
+              addCutMeshes(lines, box.cuts, box.w, box.h, box.d, true,
+                { x: box.x, y: box.y, z: box.z },
+                { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 });
+            }
+          } else {
+            const mat  = new THREE.MeshStandardMaterial({ color: ROLE_COLOR[box.role] ?? 0xD9D5CE, roughness: 0.8, metalness: 0.02 });
+            const mesh = new THREE.Mesh(extGeo, mat);
+            mesh.quaternion.setFromRotationMatrix(rm);
+            mesh.updateMatrix();
+            mesh.position.set(box.x, box.y, box.z);
+            mesh.castShadow    = true;
+            mesh.receiveShadow = true;
+            group.add(mesh);
+            mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(extGeo), new THREE.LineBasicMaterial({ color: 0x5a5a52 })));
+            if (showCuts && box.cuts && box.cuts.length > 0) {
+              addCutMeshes(mesh, box.cuts, box.w, box.h, box.d, false,
+                { x: box.x, y: box.y, z: box.z },
+                { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 });
+            }
+          }
+          continue;
+        }
+
         const geo = new THREE.BoxGeometry(box.w, box.h, box.d);
 
         if (isWireframe) {
