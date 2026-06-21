@@ -1,7 +1,6 @@
-# main.rb — ALLOY Export v0.4.1
-# v0.4 adds per-panel straight-cut detection (dado / groove / rabbet / through).
-# v0.4.1 fixes: skip detection on fittings; filter noise slivers; fix total_parts.
-# Schema: alloy.sketchup.v4
+# main.rb — ALLOY Export v0.5.1
+# v0.5.1 adds per-leaf outline_mm (true 2D silhouette for L-shapes, etc.).
+# Schema: alloy.sketchup.v5.1
 #
 # Safe: read-only, no model changes, no network.
 
@@ -9,8 +8,8 @@ require "json"
 
 module Alloy
   module Export
-    VERSION = "0.4.1"
-    SCHEMA  = "alloy.sketchup.v4"
+    VERSION = "0.5.1"
+    SCHEMA  = "alloy.sketchup.v5.1"
     MM      = 25.4   # inches → mm
 
     FITTING_KEYS   = %w[p2o leg_ atira hafele basket l_channel u_channel channel
@@ -207,6 +206,88 @@ module Alloy
       []  # don't poison the export; cuts simply unknown
     end
 
+    # ── Panel outline extraction ───────────────────────────────────────────────
+    # Returns the largest thickness-parallel face's outer loop projected to local
+    # (U, V) in mm, origin at the panel min corner — same axis convention as detect_cuts.
+    # Returns nil for groups, degenerate geometry, or anything that fails.
+
+    def self.face_outline(e)
+      return nil unless e.is_a?(Sketchup::ComponentInstance)
+
+      defn = e.definition
+      bb   = defn.bounds
+
+      bw = bb.width; bh = bb.height; bd = bb.depth
+      return nil if bw < 0.001 || bh < 0.001 || bd < 0.001
+
+      extents = { x: bw, y: bh, z: bd }
+
+      # Thickness axis = smallest extent
+      t_sym, th = extents.min_by { |_, v| v }
+
+      t_vec = case t_sym
+        when :x then Geom::Vector3d.new(1, 0, 0)
+        when :y then Geom::Vector3d.new(0, 1, 0)
+        when :z then Geom::Vector3d.new(0, 0, 1)
+      end
+
+      t_min = coord(bb.min, t_sym)
+      t_max = t_min + th
+
+      # The two face-plane axes (same order as detect_cuts)
+      face_syms = [:x, :y, :z] - [t_sym]
+      u_sym = face_syms[0]
+      v_sym = face_syms[1]
+      u_origin = coord(bb.min, u_sym)
+      v_origin = coord(bb.min, v_sym)
+
+      tol = 0.01
+
+      # Find the largest-area face that is normal to T and sits at t_min or t_max
+      best_face  = nil
+      best_area  = 0.0
+
+      defn.entities.each do |f|
+        next unless f.is_a?(Sketchup::Face)
+        next if f.normal.dot(t_vec).abs < (1.0 - tol)
+        t_val = coord(f.vertices.first.position, t_sym)
+        next unless (t_val - t_min).abs <= tol || (t_val - t_max).abs <= tol
+        a = f.area
+        if a > best_area
+          best_area = a
+          best_face = f
+        end
+      end
+
+      return nil if best_face.nil?
+
+      # Outer loop → project to (u, v) in mm relative to panel min corner
+      raw_pts = best_face.outer_loop.vertices.map do |v|
+        p = v.position
+        [mm(coord(p, u_sym) - u_origin), mm(coord(p, v_sym) - v_origin)]
+      end
+
+      return nil if raw_pts.length < 3
+
+      # Drop consecutive duplicates (rounded mm values can collapse tiny segments)
+      deduped = []
+      raw_pts.each { |pt| deduped << pt if deduped.empty? || deduped.last != pt }
+      # Remove trailing point if it duplicates the first (closed-loop sentinel)
+      deduped.pop if deduped.length > 1 && deduped.last == deduped.first
+
+      return nil if deduped.length < 3
+
+      {
+        u_axis:       axis_label(u_sym),
+        v_axis:       axis_label(v_sym),
+        thickness_mm: mm(th),
+        loop:         deduped
+      }
+
+    rescue
+      nil
+    end
+
     # ── Tree building ─────────────────────────────────────────────────────────
 
     def self.build_node(e, parent_tr)
@@ -239,6 +320,8 @@ module Alloy
             node[:cuts] = result
           end
         end
+        ol = face_outline(e)
+        node[:outline_mm] = ol unless ol.nil?
       else
         node[:is_leaf]  = false
         node[:children] = kids.map { |k| build_node(k, tr) }
