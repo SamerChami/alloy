@@ -1,6 +1,6 @@
-# main.rb — ALLOY Export v0.5.1
-# v0.5.1 adds per-leaf outline_mm (true 2D silhouette for L-shapes, etc.).
-# Schema: alloy.sketchup.v5.1
+# main.rb — ALLOY Export v0.5.2
+# v0.5.2 = v5 (axes on every node) + v5.1 (outline_mm on every leaf) combined.
+# Schema: alloy.sketchup.v5.2
 #
 # Safe: read-only, no model changes, no network.
 
@@ -8,8 +8,8 @@ require "json"
 
 module Alloy
   module Export
-    VERSION = "0.5.1"
-    SCHEMA  = "alloy.sketchup.v5.1"
+    VERSION = "0.5.2"
+    SCHEMA  = "alloy.sketchup.v5.2"
     MM      = 25.4   # inches → mm
 
     FITTING_KEYS   = %w[p2o leg_ atira hafele basket l_channel u_channel channel
@@ -288,6 +288,20 @@ module Alloy
       nil
     end
 
+    # ── Axis orientation ──────────────────────────────────────────────────────
+    # Returns the component's three LOCAL axes as unit vectors in WORLD space.
+
+    def self.world_axes(tr)
+      ax = tr.xaxis.normalize
+      ay = tr.yaxis.normalize
+      az = tr.zaxis.normalize
+      {
+        x: [ax.x.round(6), ax.y.round(6), ax.z.round(6)],
+        y: [ay.x.round(6), ay.y.round(6), ay.z.round(6)],
+        z: [az.x.round(6), az.y.round(6), az.z.round(6)],
+      }
+    end
+
     # ── Tree building ─────────────────────────────────────────────────────────
 
     def self.build_node(e, parent_tr)
@@ -302,7 +316,8 @@ module Alloy
         type:      e.is_a?(Sketchup::Group) ? "group" : "component",
         size_mm:   { x: w, y: h, z: d },
         sorted_mm: [w, h, d].sort,
-        pos_mm:    { x: mm(center_world.x), y: mm(center_world.y), z: mm(center_world.z) }
+        pos_mm:    { x: mm(center_world.x), y: mm(center_world.y), z: mm(center_world.z) },
+        axes:      world_axes(tr),
       }
 
       if kids.empty?
