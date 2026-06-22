@@ -1,5 +1,5 @@
-# main.rb — ALLOY Export v0.6.0
-# v0.6.0 = v5.3 + deduped `meshes` dict + `mesh_ref` on meshed fittings.
+# main.rb — ALLOY Export v0.6.1
+# v0.6.1 = v0.6.0 + fix mesh dedupe (defn.name key, empty-name fallback).
 # Schema: alloy.sketchup.v6
 #
 # Safe: read-only, no model changes, no network.
@@ -8,7 +8,7 @@ require "json"
 
 module Alloy
   module Export
-    VERSION = "0.6.0"
+    VERSION = "0.6.1"
     SCHEMA  = "alloy.sketchup.v6"
     MM      = 25.4   # inches → mm
 
@@ -389,6 +389,8 @@ module Alloy
 
     def self.definition_mesh(defn)
       key = defn.name
+      # Fallback for unnamed definitions so distinct unnamed defs don't collide.
+      key = "def_#{defn.entityID}" if key.nil? || key.strip.empty?
       return key if @mesh_cache.key?(key)
 
       verts = []
