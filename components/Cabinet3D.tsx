@@ -612,6 +612,7 @@ export function Cabinet3D({
               parts={parts}
               skuPanels={skuPanels}
               rawPanels={rawPanels}
+              meshes={meshes}
               inModal
               onClose={() => setModalOpen(false)}
             />
