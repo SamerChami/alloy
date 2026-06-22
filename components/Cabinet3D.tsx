@@ -18,6 +18,8 @@ type Props = {
   skuPanels?: SkuPanel3D[];
   /** .3ds import: sorted T/W/H extents + remapped positions. */
   rawPanels?: RawPanel3D[];
+  /** v6: deduped fitting meshes keyed by component definition name. */
+  meshes?: Record<string, { vertices: [number, number, number][]; triangles: [number, number, number][] }>;
   /** True when this instance is already rendered inside the modal — hides expand, shows X. */
   inModal?: boolean;
   /** When provided, renders an X close button in the toolbar. */
@@ -46,6 +48,7 @@ export function Cabinet3D({
   parts,
   skuPanels,
   rawPanels,
+  meshes,
   inModal = false,
   onClose,
 }: Props) {
@@ -238,8 +241,44 @@ export function Cabinet3D({
           const isChannel = ln.includes("l_channel") || ln.includes("u_channel") || ln.includes("channel");
           let obj: THREE.Group;
 
-          if (isChannel && box.profile && box.orient) {
-            // Channel profile extrude: cross-section shape extruded along run axis
+          if (box.mesh_ref && meshes?.[box.mesh_ref] && box.orient) {
+            // Priority 1: true fitting mesh (v6) — BufferGeometry from exported triangles
+            const md = meshes[box.mesh_ref];
+            // Center the mesh at its own bounding-box center (SU definition origin may differ)
+            let mnX = Infinity, mnY = Infinity, mnZ = Infinity;
+            let mxX = -Infinity, mxY = -Infinity, mxZ = -Infinity;
+            for (const v of md.vertices) {
+              if (v[0] < mnX) mnX = v[0]; if (v[0] > mxX) mxX = v[0];
+              if (v[1] < mnY) mnY = v[1]; if (v[1] > mxY) mxY = v[1];
+              if (v[2] < mnZ) mnZ = v[2]; if (v[2] > mxZ) mxZ = v[2];
+            }
+            const bcx = (mnX + mxX) / 2;
+            const bcy = (mnY + mxY) / 2;
+            const bcz = (mnZ + mxZ) / 2;
+            const g = new THREE.BufferGeometry();
+            const vpos = new Float32Array(md.vertices.length * 3);
+            md.vertices.forEach((v, i) => {
+              // SU local (x,y,z) → three local (x,y,z): orient matrix maps SU local → three world
+              vpos[i*3  ] = (v[0] - bcx) / 1000;
+              vpos[i*3+1] = (v[1] - bcy) / 1000;
+              vpos[i*3+2] = (v[2] - bcz) / 1000;
+            });
+            g.setAttribute("position", new THREE.BufferAttribute(vpos, 3));
+            g.setIndex(md.triangles.flat());
+            g.computeVertexNormals();
+            const o = box.orient;
+            const m4 = new THREE.Matrix4();
+            m4.set(
+              o[0], o[3], o[6], 0,
+              o[1], o[4], o[7], 0,
+              o[2], o[5], o[8], 0,
+              0, 0, 0, 1,
+            );
+            obj = new THREE.Group();
+            addPartToGroup(obj, g, fittingColor(name)!, isWireframe);
+            obj.quaternion.setFromRotationMatrix(m4);
+          } else if (isChannel && box.profile && box.orient) {
+            // Priority 2: channel profile extrude (Stage 9f)
             const pf   = box.profile;
             const run  = pf.run_mm / 1000;
             const pMax = Math.max(...pf.loop.map(pt => pt[0])) / 1000;
@@ -413,7 +452,7 @@ export function Cabinet3D({
     }, 150);
 
     return () => clearTimeout(tid);
-  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, skuPanels, rawPanels, showDoors, showCuts, explode, viewMode, updateCamera]);
+  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, skuPanels, rawPanels, meshes, showDoors, showCuts, explode, viewMode, updateCamera]);
 
   // ── pointer handlers ──────────────────────────────────────────────────
   // Left (0) → PAN    Middle (1) / Right (2) → ORBIT

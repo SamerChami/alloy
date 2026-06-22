@@ -218,6 +218,8 @@ export function ProjectImportShell() {
           cuts: part.cuts,
           axes: part.axes,
           outline_mm: part.outline_mm,
+          profile_mm: part.profile_mm,
+          mesh_ref: part.mesh_ref,
         }));
       })()
     : undefined;
@@ -401,6 +403,7 @@ export function ProjectImportShell() {
                 cabinetDepth={previewDims.depth_mm}
                 parts={[]}
                 skuPanels={previewPanels3D}
+                meshes={parsed.meshes}
               />
             </>
           )}

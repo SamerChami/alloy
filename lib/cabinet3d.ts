@@ -34,6 +34,16 @@ export type PanelOutline = {
   loop: [number, number][];
 };
 
+// Channel cross-section profile: the end-face loop (p, q) extruded along run_axis.
+// Matches what the Ruby extension emits in profile_mm (channels only).
+export type ChannelProfile = {
+  p_axis:   "width" | "height" | "depth";
+  q_axis:   "width" | "height" | "depth";
+  run_axis: "width" | "height" | "depth";
+  run_mm:   number;
+  loop:     [number, number][];
+};
+
 export type Box3D = {
   w: number;
   h: number;
@@ -47,6 +57,8 @@ export type Box3D = {
   orient?: number[]; // 9 numbers, three-space 3x3 basis (C·Rworld), column-major
   uprightCylinder?: boolean; // true for leg/p2o: skip orient, always stand on Y
   outline?: PanelOutline;   // v5.1: true 2D silhouette; renderer extrudes when present
+  profile?: ChannelProfile; // v5.3: channel cross-section; renderer extrudes along run
+  mesh_ref?: string;        // v6: key into meshes dict; renderer builds BufferGeometry
 };
 
 // Minimal panel shape for real-position 3D rendering (satisfied by ImportedPanel).
@@ -298,6 +310,8 @@ export type SkuPanel3D = {
   cuts?: Cut[];
   axes?: { x: number[]; y: number[]; z: number[] }; // v5 orientation (local axes in SU world)
   outline_mm?: PanelOutline;                          // v5.1 true 2D silhouette
+  profile_mm?: ChannelProfile;                        // v5.3 channel cross-section
+  mesh_ref?: string;                                  // v6 reference into top-level meshes dict
 };
 
 // Oriented build path for v5 exports where every panel carries `axes`.
@@ -343,7 +357,7 @@ function buildBoxesFromOrientedPanels(
         z: center.z + col0[2]*sx*hW + col1[2]*sy*hH + col2[2]*sz*hD,
       });
     }
-    return { role, part_name: p.part_name, bw, bh, bd, center, orient, corners, cuts: p.cuts, outline_mm: p.outline_mm };
+    return { role, part_name: p.part_name, bw, bh, bd, center, orient, corners, cuts: p.cuts, outline_mm: p.outline_mm, profile_mm: p.profile_mm, mesh_ref: p.mesh_ref };
   });
 
   // Global min-corner across all panel AABBs → shift cabinet to origin
@@ -373,7 +387,7 @@ function buildBoxesFromOrientedPanels(
       }
     }
 
-    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name, cuts: p.cuts, orient: p.orient, uprightCylinder: isUprightCylinderFitting(p.part_name ?? ""), outline: p.outline_mm });
+    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name, cuts: p.cuts, orient: p.orient, uprightCylinder: isUprightCylinderFitting(p.part_name ?? ""), outline: p.outline_mm, profile: p.profile_mm, mesh_ref: p.mesh_ref });
   }
 
   return boxes;

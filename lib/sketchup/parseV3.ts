@@ -13,6 +13,8 @@ const SUPPORTED_SCHEMAS = [
   "alloy.sketchup.v5",
   "alloy.sketchup.v5.1",
   "alloy.sketchup.v5.2",
+  "alloy.sketchup.v5.3",
+  "alloy.sketchup.v6",
 ] as const;
 
 export type SupportedSchema = (typeof SUPPORTED_SCHEMAS)[number];
@@ -46,6 +48,16 @@ export type V3Node = {
     thickness_mm: number;
     loop: [number, number][];
   };
+  // v5.3 fields (channel leaves only)
+  profile_mm?: {
+    p_axis:   "width" | "height" | "depth";
+    q_axis:   "width" | "height" | "depth";
+    run_axis: "width" | "height" | "depth";
+    run_mm:   number;
+    loop:     [number, number][];
+  };
+  // v6 fields (non-channel fitting leaves only)
+  mesh_ref?: string;
 };
 
 export type V3Json = {
@@ -57,6 +69,8 @@ export type V3Json = {
   total_parts?: number;    // present from v0.4.1+; null/absent in older exports
   summary: Record<string, number>;
   roots: V3Node[];
+  // v6: deduped fitting meshes keyed by component definition name
+  meshes?: Record<string, { vertices: [number, number, number][]; triangles: [number, number, number][] }>;
 };
 
 // ── Part type (output of cabinetToParts) ─────────────────────────────────────
@@ -82,6 +96,16 @@ export type V3Part = {
     thickness_mm: number;
     loop: [number, number][];
   };
+  // v5.3: channel cross-section profile
+  profile_mm?: {
+    p_axis:   "width" | "height" | "depth";
+    q_axis:   "width" | "height" | "depth";
+    run_axis: "width" | "height" | "depth";
+    run_mm:   number;
+    loop:     [number, number][];
+  };
+  // v6: reference into the top-level meshes dict
+  mesh_ref?: string;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -125,6 +149,10 @@ export function cabinetToParts(root: V3Node): { panels: V3Part[]; fittings: V3Pa
       axes: leaf.axes,
       // carry v5.1 outline; leave undefined when absent
       outline_mm: leaf.outline_mm,
+      // carry v5.3 channel profile; leave undefined when absent
+      profile_mm: leaf.profile_mm,
+      // carry v6 mesh reference; leave undefined when absent
+      mesh_ref: leaf.mesh_ref,
     };
     if (part.isFitting) fittings.push(part);
     else panels.push(part);

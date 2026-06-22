@@ -177,6 +177,8 @@ export function SingleImportShell() {
     cuts: part.cuts,
     axes: part.axes,
     outline_mm: part.outline_mm,
+    profile_mm: part.profile_mm,
+    mesh_ref: part.mesh_ref,
   }));
 
   const dims = parsed ? rootDims(parsed.roots[0]) : null;
@@ -295,6 +297,7 @@ export function SingleImportShell() {
                 cabinetDepth={dims.depth_mm}
                 parts={[]}
                 skuPanels={allLeaves}
+                meshes={parsed.meshes}
               />
             </>
           )}
