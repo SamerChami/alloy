@@ -234,16 +234,52 @@ export function Cabinet3D({
 
         // Use smart fitting shape when the part name identifies a known fitting type
         if (fittingColor(name) !== null) {
-          const obj = buildFittingObject(name, box.w, box.h, box.d, isWireframe);
-          if (box.orient && !box.uprightCylinder) {
-            const m = new THREE.Matrix4();
-            m.set(
-              box.orient[0], box.orient[3], box.orient[6], 0,
-              box.orient[1], box.orient[4], box.orient[7], 0,
-              box.orient[2], box.orient[5], box.orient[8], 0,
+          const ln        = name.toLowerCase();
+          const isChannel = ln.includes("l_channel") || ln.includes("u_channel") || ln.includes("channel");
+          let obj: THREE.Group;
+
+          if (isChannel && box.profile && box.orient) {
+            // Channel profile extrude: cross-section shape extruded along run axis
+            const pf   = box.profile;
+            const run  = pf.run_mm / 1000;
+            const pMax = Math.max(...pf.loop.map(pt => pt[0])) / 1000;
+            const qMax = Math.max(...pf.loop.map(pt => pt[1])) / 1000;
+            const shape = new THREE.Shape();
+            shape.moveTo(pf.loop[0][0] / 1000, pf.loop[0][1] / 1000);
+            for (let i = 1; i < pf.loop.length; i++) shape.lineTo(pf.loop[i][0] / 1000, pf.loop[i][1] / 1000);
+            shape.closePath();
+            const extGeo = new THREE.ExtrudeGeometry(shape, { depth: run, bevelEnabled: false });
+            extGeo.translate(-pMax / 2, -qMax / 2, -run / 2);
+            extGeo.computeVertexNormals();
+            const o  = box.orient;
+            const oC = [[o[0],o[1],o[2]], [o[3],o[4],o[5]], [o[6],o[7],o[8]]];
+            const aI: Record<string, number> = { width: 0, depth: 1, height: 2 };
+            const pI = aI[pf.p_axis];
+            const qI = aI[pf.q_axis];
+            const rI = aI[pf.run_axis];
+            const rm = new THREE.Matrix4();
+            rm.set(
+              oC[pI][0], oC[qI][0], oC[rI][0], 0,
+              oC[pI][1], oC[qI][1], oC[rI][1], 0,
+              oC[pI][2], oC[qI][2], oC[rI][2], 0,
               0, 0, 0, 1,
             );
-            obj.quaternion.setFromRotationMatrix(m);
+            obj = new THREE.Group();
+            addPartToGroup(obj, extGeo, fittingColor(name)!, isWireframe);
+            obj.quaternion.setFromRotationMatrix(rm);
+          } else {
+            // Default fitting (legs, P2O, boxes, channels without profile)
+            obj = buildFittingObject(name, box.w, box.h, box.d, isWireframe);
+            if (box.orient && !box.uprightCylinder) {
+              const m = new THREE.Matrix4();
+              m.set(
+                box.orient[0], box.orient[3], box.orient[6], 0,
+                box.orient[1], box.orient[4], box.orient[7], 0,
+                box.orient[2], box.orient[5], box.orient[8], 0,
+                0, 0, 0, 1,
+              );
+              obj.quaternion.setFromRotationMatrix(m);
+            }
           }
           obj.position.set(box.x, box.y, box.z);
           group.add(obj);
