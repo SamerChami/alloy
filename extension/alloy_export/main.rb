@@ -1,6 +1,6 @@
-# main.rb — ALLOY Export v0.5.2
-# v0.5.2 = v5 (axes on every node) + v5.1 (outline_mm on every leaf) combined.
-# Schema: alloy.sketchup.v5.2
+# main.rb — ALLOY Export v0.6.0
+# v0.6.0 = v5.3 + deduped `meshes` dict + `mesh_ref` on meshed fittings.
+# Schema: alloy.sketchup.v6
 #
 # Safe: read-only, no model changes, no network.
 
@@ -8,8 +8,8 @@ require "json"
 
 module Alloy
   module Export
-    VERSION = "0.5.2"
-    SCHEMA  = "alloy.sketchup.v5.2"
+    VERSION = "0.6.0"
+    SCHEMA  = "alloy.sketchup.v6"
     MM      = 25.4   # inches → mm
 
     FITTING_KEYS   = %w[p2o leg_ atira hafele basket l_channel u_channel channel
@@ -288,6 +288,87 @@ module Alloy
       nil
     end
 
+    # ── Channel cross-section extraction ─────────────────────────────────────
+    # Returns the end-face (perpendicular to the run axis) outer loop projected to
+    # the two cross-section axes (mm, origin at min corner) plus run length.
+    # Run axis = the LARGEST local extent. Returns nil on any failure; never raises.
+
+    def self.cross_section(e)
+      return nil unless e.is_a?(Sketchup::ComponentInstance)
+
+      defn = e.definition
+      bb   = defn.bounds
+
+      bw = bb.width; bh = bb.height; bd = bb.depth
+      return nil if bw < 0.001 || bh < 0.001 || bd < 0.001
+
+      extents = { x: bw, y: bh, z: bd }
+
+      # Run axis = largest extent
+      r_sym, r_extent = extents.max_by { |_, v| v }
+
+      run_vec = case r_sym
+        when :x then Geom::Vector3d.new(1, 0, 0)
+        when :y then Geom::Vector3d.new(0, 1, 0)
+        when :z then Geom::Vector3d.new(0, 0, 1)
+      end
+
+      r_min = coord(bb.min, r_sym)
+      r_max = r_min + r_extent
+
+      # Cross-section axes (stable ascending order)
+      cs_syms  = [:x, :y, :z] - [r_sym]
+      p_sym    = cs_syms[0]
+      q_sym    = cs_syms[1]
+      p_origin = coord(bb.min, p_sym)
+      q_origin = coord(bb.min, q_sym)
+
+      tol = 0.01
+
+      # Find the end face: normal ∥ run axis, at one end, greatest area
+      best_face = nil
+      best_area = 0.0
+
+      defn.entities.each do |f|
+        next unless f.is_a?(Sketchup::Face)
+        next if f.normal.dot(run_vec).abs < (1.0 - tol)
+        t_val = coord(f.vertices.first.position, r_sym)
+        next unless (t_val - r_min).abs <= tol || (t_val - r_max).abs <= tol
+        a = f.area
+        if a > best_area
+          best_area = a
+          best_face = f
+        end
+      end
+
+      return nil if best_face.nil?
+
+      # Project outer loop to (p, q) in mm relative to cross-section min corner
+      raw_pts = best_face.outer_loop.vertices.map do |v|
+        pt = v.position
+        [mm(coord(pt, p_sym) - p_origin), mm(coord(pt, q_sym) - q_origin)]
+      end
+
+      return nil if raw_pts.length < 3
+
+      deduped = []
+      raw_pts.each { |pt| deduped << pt if deduped.empty? || deduped.last != pt }
+      deduped.pop if deduped.length > 1 && deduped.last == deduped.first
+
+      return nil if deduped.length < 3
+
+      {
+        p_axis:   axis_label(p_sym),
+        q_axis:   axis_label(q_sym),
+        run_axis: axis_label(r_sym),
+        run_mm:   mm(r_extent),
+        loop:     deduped
+      }
+
+    rescue
+      nil
+    end
+
     # ── Axis orientation ──────────────────────────────────────────────────────
     # Returns the component's three LOCAL axes as unit vectors in WORLD space.
 
@@ -300,6 +381,35 @@ module Alloy
         y: [ay.x.round(6), ay.y.round(6), ay.z.round(6)],
         z: [az.x.round(6), az.y.round(6), az.z.round(6)],
       }
+    end
+
+    # ── Fitting mesh extraction (deduped by component definition) ────────────
+    # Returns the cache key (definition name) on success, nil on any failure.
+    # Mesh is computed in definition LOCAL space — instance-independent.
+
+    def self.definition_mesh(defn)
+      key = defn.name
+      return key if @mesh_cache.key?(key)
+
+      verts = []
+      tris  = []
+      base  = 0
+      defn.entities.grep(Sketchup::Face).each do |f|
+        pm  = f.mesh                     # Geom::PolygonMesh, triangulated
+        pts = pm.points                  # 1-indexed array of Geom::Point3d (local coords)
+        pts.each { |p| verts << [mm(p.x), mm(p.y), mm(p.z)] }
+        pm.polygons.each do |poly|       # signed 1-based indices; sign = soft edge
+          a, b, c = poly.map { |i| base + (i.abs - 1) }
+          tris << [a, b, c]
+        end
+        base += pts.length
+      end
+      return nil if verts.empty? || tris.empty?
+
+      @mesh_cache[key] = { vertices: verts, triangles: tris }
+      key
+    rescue
+      nil
     end
 
     # ── Tree building ─────────────────────────────────────────────────────────
@@ -326,6 +436,11 @@ module Alloy
         if has_any?(node[:name], FITTING_KEYS)
           # Fittings (legs, hinges, channels, etc.) — skip cut detection entirely.
           node[:cuts] = []
+          # Non-channel fittings get a deduplicated mesh reference.
+          if !has_any?(node[:name], ["l_channel","u_channel","channel"])
+            mk = (e.is_a?(Sketchup::ComponentInstance) ? definition_mesh(e.definition) : nil)
+            node[:mesh_ref] = mk unless mk.nil?
+          end
         else
           result = detect_cuts(e)
           if result == :complex
@@ -337,6 +452,10 @@ module Alloy
         end
         ol = face_outline(e)
         node[:outline_mm] = ol unless ol.nil?
+        if has_any?(node[:name], ["l_channel","u_channel","channel"])
+          pf = cross_section(e)
+          node[:profile_mm] = pf unless pf.nil?
+        end
       else
         node[:is_leaf]  = false
         node[:children] = kids.map { |k| build_node(k, tr) }
@@ -390,6 +509,7 @@ module Alloy
     # ── Export entry point ────────────────────────────────────────────────────
 
     def self.run
+      @mesh_cache = {}   # reset per-export; prevents accumulation across runs
       model = Sketchup.active_model
       sel   = model.selection
       roots =
@@ -423,7 +543,8 @@ module Alloy
         root_count:  trees.length,
         total_parts: total_parts,
         summary:     by_type,
-        roots:       trees
+        roots:       trees,
+        meshes:      @mesh_cache
       }
 
       path = UI.savepanel("Save ALLOY JSON", "", "alloy_export.json")
