@@ -68,29 +68,43 @@
 - **Result:** the L-shaped base corner cabinet (`BC2.K3.120*120`) renders correctly —
   both perpendicular legs, doors, shelves, bottom, upright legs, channels in place.
 
-**Latest artifacts:** `alloy_export_0_5_0.rbz` (schema `alloy.sketchup.v5`,
-version `0.5.0`); verified corner-cabinet export `alloy_export_0_5_0.json`
-(orthonormal `axes` on all leaves; two L legs distinguishable by orientation).
+- [x] **9e** Panel outline export — extension emits `outline_mm` (true 2D silhouette)
+  on every leaf; viewer extrudes it, box fallback when absent. Fixes the L-shaped mobile
+  shelf. Schema **v5.1**.
+- [x] **9e-fix** Axes regression — a v5.1 build had dropped `axes` (0/23 leaves), forcing
+  the legacy path so outlines never rendered. Reconciled to emit BOTH `axes` and
+  `outline_mm`; schema **v5.2 / v0.5.2**. Shelf renders L; side cuts show.
+- [x] **9f** Channel cross-section — extension emits `profile_mm` (END-face L/U section)
+  for channel fittings; viewer extrudes it along the run axis. Real Gola L-profile with
+  correct foot direction (foot heuristic retired). Schema **v5.3 / v0.5.3**.
+- [x] **10** True fitting meshes — fittings that aren't profile-representable (legs,
+  hardware) export full triangulated geometry, **deduped by canonical geometry hash**
+  (10-fix2, after name-dedupe failed on unique-named leg defs). Viewer renders a
+  `BufferGeometry`; cylinder fallback. Modal viewer also receives `meshes` (10-fix3).
+  Schema **v6 / v0.6.2**. Panels keep `outline_mm`, channels keep `profile_mm` (meshes
+  are preview-only; CNC still uses outlines/cuts).
+- **Result:** the corner cabinet `BC2.K3.120*120` is fully solved across every part type
+  and both viewers — panels with cuts, L-shaped shelf, L-profile Gola channels, true-mesh
+  detailed legs.
+
+**Latest artifacts:** `alloy_export.rbz` **v0.6.2**, schema **`alloy.sketchup.v6`**;
+verified export `alloy_export_0_6_2.json` (axes + outline on all 23 leaves, profile on 2
+channels, 2 deduped leg meshes via geometry hash — 7+1 from one mirrored instance).
 
 ---
 
 ## Open Items (next)
 
-### 🟡 Stage 9e — Panel/profile outline export (mobile shelf L-shape + L_channel foot)
-Two remaining issues share one root cause — the AABB drops the true 2D silhouette:
-1. **Mobile shelf** renders as a full square instead of its real L-shape (notch
-   filled). The part IS L-shaped in SketchUp; `size_mm` only carries the enclosing
-   rectangle, so the viewer's `BoxGeometry` fills the notch.
-2. **L_Channel foot** can point the wrong way for one of the two perpendicular runs.
-   `buildFittingObject` guesses the L-section flip from the bounding box and can't
-   recover an asymmetric profile's true orientation.
+### 🟡 v6 persistence — outline / profile / mesh into saved products
+The viewer consumes v6 live, but saved products (rebuilt from `bom_lines`) don't yet
+store `outline_mm` / `profile_mm` / `mesh_ref` / `meshes`, so a re-opened product would
+fall back to boxes/cylinders. Extend persistence (and a mesh store) if saved products
+need the accurate rebuild. Live import preview is fully correct already.
 
-**Decision:** export the real outline for ALL panels (uniform; also feeds CNC).
-Add an optional `outline_mm` (local 2D face loop on the two non-thickness axes +
-thickness) to every leaf in the extension → schema bump **v5.1** (purely additive).
-Viewer extrudes the outline via `THREE.Shape` + `ExtrudeGeometry` when present;
-box fallback otherwise. The same outline makes the L_channel foot EXACT (no
-heuristic). This supersedes the earlier "foot heuristic (option A)" plan.
+### 🟡 Modelling note — legs as unique components
+This cabinet's 8 legs were 8 separate component definitions (copied, not instanced), so
+name-dedupe couldn't collapse them; geometry-hash dedupe handles it (8→1–2 meshes).
+Cleaner long-term: model repeated fittings as instances of ONE component. Not blocking.
 
 ### 🟡 Migrate older imports to the oriented path (optional)
 The oriented-box path is currently additive (v5 only). Existing v2/v3/v4 imports use
@@ -126,6 +140,10 @@ Upload an export → match cabinet names to `products.code` → auto-generate a 
 - **3D placement (v5):** oriented box — LOCAL `size_mm` + `axes` orientation +
   `pos_mm`, with the Z-up→Y-up map `three=(su.x, su.z, -su.y)` as a fixed basis.
   `sorted_mm` is for cut-list H/W/T only.
+- **Hybrid part representation (v6):** panels → `outline_mm` (flat extrude, CNC-ready);
+  channels → `profile_mm` (cross-section extrude); other fittings → true `mesh` (deduped
+  by geometry hash). Lightest representation that captures each part; meshes are
+  preview-only and never replace outlines/cuts for CNC.
 - **Orientation export is the source of truth for rotation** — bounding boxes alone
   cannot represent rotated/asymmetric parts; `axes` (v5) supplies what the AABB drops.
 - Product **code** = leading slash-segment of the SketchUp name; join key to catalogue.

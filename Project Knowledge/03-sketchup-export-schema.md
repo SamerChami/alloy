@@ -1,7 +1,7 @@
-# ALLOY App — SketchUp Export JSON Schema (alloy.sketchup.v5)
+# ALLOY App — SketchUp Export JSON Schema (alloy.sketchup.v6)
 
 ## Overview
-The ALLOY SketchUp extension (`alloy_export.rbz`, currently **v0.5.0**) exports a
+The ALLOY SketchUp extension (`alloy_export.rbz`, currently **v0.6.2**) exports a
 SketchUp model to a structured JSON file consumed by the app's import pipeline.
 
 The schema has evolved: **v2** (flat items) → **v3** (nested tree) →
@@ -17,6 +17,74 @@ be axis-aligned. v5 adds `axes` (the part's local orientation), so the viewer ca
 render each part as an ORIENTED box and rotated cabinets render correctly.
 
 ---
+
+
+---
+
+## v5.1 → v6 additions (current)
+
+Everything below the next divider describes the **v5** base (axes, placement, cuts),
+which is still current. The fields added since v5 are summarized here.
+
+### `outline_mm` (v5.1+) — panel silhouette, on every leaf
+The true 2D outer loop of the leaf's largest thickness-parallel face, in panel-LOCAL
+mm, origin at the panel min corner. Lets the viewer extrude the real silhouette
+(e.g. an L-shaped corner shelf) instead of a bounding box. Also the CNC/cut-list cut
+profile.
+```json
+"outline_mm": {
+  "u_axis": "width", "v_axis": "depth", "thickness_mm": 18.0,
+  "loop": [[u0,v0],[u1,v1], ...]   // ordered; may include tessellated curves (fillets)
+}
+```
+- Loop point count varies: a plain rectangle = 4 pts; an L = 6 logical corners (more
+  if an inner corner is filleted — the arc is tessellated).
+- Viewer builds a `THREE.Shape` + `ExtrudeGeometry`; box fallback when absent.
+
+### `profile_mm` (v5.3+) — channel cross-section, on channel fittings only
+For extruded-profile fittings (`l_channel`/`u_channel`/`channel`): the END-face
+cross-section (the profile), extruded along the run axis. This renders the true Gola
+L/U section with the foot oriented as modelled (the old foot-direction guess is gone).
+```json
+"profile_mm": {
+  "p_axis": "depth", "q_axis": "height", "run_axis": "width",
+  "run_mm": 667.0,
+  "loop": [[p0,q0], ...]   // cross-section profile, local mm
+}
+```
+- The cross-section is the SMALLEST face (perpendicular to the run = LONGEST axis) —
+  distinct from `outline_mm` (largest face).
+- Panels do NOT get `profile_mm`; channels keep it instead of a mesh.
+
+### `meshes` + `mesh_ref` (v6) — true geometry for detailed fittings
+Fittings that are NOT profile-representable (legs, hardware) export their full
+triangulated SketchUp geometry. Meshes are **deduped by canonical geometry hash**
+(invariant to vertex/triangle order), so identical parts share one entry regardless of
+how the model named or copied them.
+
+Top-level dictionary (each unique geometry once):
+```json
+"meshes": {
+  "mesh_<hash>": {
+    "vertices":  [[x,y,z], ...],   // local mm
+    "triangles": [[a,b,c], ...]    // 0-based indices into vertices
+  }
+}
+```
+Each meshed leaf references its geometry:
+```json
+"mesh_ref": "mesh_<hash>"
+```
+- Gate: `fitting && !channel`. Panels keep `outline_mm`; channels keep `profile_mm`;
+  legs/hardware get `mesh_ref`. (Mirrored instances are reflections → may form a 2nd
+  hash entry; that is correct.)
+- Viewer builds a `BufferGeometry` from the referenced mesh, maps SU→three `(x,z,-y)`,
+  applies `axes` orientation + `pos_mm`. Cylinder fallback (Stage 9d) when no mesh.
+- Meshes are for the 3D PREVIEW only — cut-lists/CNC still use `outline_mm`/`cuts`.
+
+### Supported schema strings (app parser)
+`alloy.sketchup.v3`, `v4`, `v5`, `v5.1`, `v5.2`, `v5.3`, `v6`.
+
 
 ## Top-Level Structure (v5)
 
