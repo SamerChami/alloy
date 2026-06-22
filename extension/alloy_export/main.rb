@@ -1,14 +1,15 @@
-# main.rb — ALLOY Export v0.6.1
-# v0.6.1 = v0.6.0 + fix mesh dedupe (defn.name key, empty-name fallback).
+# main.rb — ALLOY Export v0.6.2
+# v0.6.2 = v0.6.1 + dedupe meshes by canonical geometry hash (handles unique-named defs).
 # Schema: alloy.sketchup.v6
 #
 # Safe: read-only, no model changes, no network.
 
 require "json"
+require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.1"
+    VERSION = "0.6.2"
     SCHEMA  = "alloy.sketchup.v6"
     MM      = 25.4   # inches → mm
 
@@ -383,32 +384,48 @@ module Alloy
       }
     end
 
-    # ── Fitting mesh extraction (deduped by component definition) ────────────
-    # Returns the cache key (definition name) on success, nil on any failure.
-    # Mesh is computed in definition LOCAL space — instance-independent.
+    # ── Fitting mesh extraction (deduped by canonical geometry hash) ─────────
+    # Meshes are keyed by a content hash so geometrically identical definitions
+    # (even with distinct #NN names from "Make Unique") share one cache entry.
+    # All computation is in definition LOCAL space — instance-independent.
 
-    def self.definition_mesh(defn)
-      key = defn.name
-      # Fallback for unnamed definitions so distinct unnamed defs don't collide.
-      key = "def_#{defn.entityID}" if key.nil? || key.strip.empty?
-      return key if @mesh_cache.key?(key)
-
-      verts = []
-      tris  = []
-      base  = 0
+    # Step 1: extract raw vertices+triangles from a definition.
+    def self.mesh_geometry(defn)
+      verts = []; tris = []; base = 0
       defn.entities.grep(Sketchup::Face).each do |f|
-        pm  = f.mesh                     # Geom::PolygonMesh, triangulated
-        pts = pm.points                  # 1-indexed array of Geom::Point3d (local coords)
+        pm  = f.mesh
+        pts = pm.points
         pts.each { |p| verts << [mm(p.x), mm(p.y), mm(p.z)] }
-        pm.polygons.each do |poly|       # signed 1-based indices; sign = soft edge
+        pm.polygons.each do |poly|
           a, b, c = poly.map { |i| base + (i.abs - 1) }
           tris << [a, b, c]
         end
         base += pts.length
       end
       return nil if verts.empty? || tris.empty?
+      { vertices: verts, triangles: tris }
+    end
 
-      @mesh_cache[key] = { vertices: verts, triangles: tris }
+    # Step 2: canonical hash invariant to vertex order and triangle order.
+    # Sort vertices, remap triangle indices, sort triangles, MD5 the JSON.
+    def self.mesh_hash(mesh)
+      vlist = mesh[:vertices]
+      order = (0...vlist.length).sort_by { |i| vlist[i] }
+      remap = Array.new(vlist.length)
+      order.each_with_index { |old_i, new_i| remap[old_i] = new_i }
+      sorted_verts  = order.map { |i| vlist[i] }
+      remapped_tris = mesh[:triangles].map { |t| t.map { |i| remap[i] }.sort }
+      remapped_tris.sort!
+      Digest::MD5.hexdigest([sorted_verts, remapped_tris].to_json)[0, 16]
+    end
+
+    # Step 3: build geometry, key cache by "mesh_"+hash; identical geometry reuses.
+    # Returns the cache key on success, nil on any failure.
+    def self.definition_mesh(defn)
+      geo = mesh_geometry(defn)
+      return nil if geo.nil?
+      key = "mesh_" + mesh_hash(geo)
+      @mesh_cache[key] ||= geo
       key
     rescue
       nil
