@@ -9,7 +9,7 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.6"
+    VERSION = "0.6.7"
     SCHEMA  = "alloy.sketchup.v6.3"
     MM      = 25.4   # inches → mm
 
@@ -107,27 +107,9 @@ module Alloy
       t_min = coord(bb.min, t_sym)
       t_max = t_min + th
 
-      # World-space face polarity (Fix A): use world positions of floor centroid
-      # and the two big-face centers — no local normal transform needed.
-      pc_w = tr * bb.center
-      bc   = bb.center
-      if @cab_center
-        fa_local = case t_sym
-          when :x then Geom::Point3d.new(t_min, bc.y, bc.z)
-          when :y then Geom::Point3d.new(bc.x, t_min, bc.z)
-          when :z then Geom::Point3d.new(bc.x, bc.y, t_min)
-        end
-        fb_local = case t_sym
-          when :x then Geom::Point3d.new(t_max, bc.y, bc.z)
-          when :y then Geom::Point3d.new(bc.x, t_max, bc.z)
-          when :z then Geom::Point3d.new(bc.x, bc.y, t_max)
-        end
-        aw    = tr * fa_local
-        bw    = tr * fb_local
-        int_w = @cab_center - pc_w
-      else
-        aw = bw = int_w = nil
-      end
+      # World-space face polarity: floor face normal vs cabinet-interior direction.
+      pc_w  = tr * bb.center
+      int_w = @cab_center ? @cab_center - pc_w : nil
 
       # The two face-plane axes (everything except T)
       face_syms = [:x, :y, :z] - [t_sym]
@@ -191,24 +173,12 @@ module Alloy
           runs_sym      = u_sym
         end
 
-        # Open face in world space: which big face is the floor centroid nearer to?
-        face_side = if aw && int_w
-          n_pts_f    = all_pts.length.to_f
-          floor_lcl  = Geom::Point3d.new(
-            all_pts.inject(0.0) { |s, p| s + p.x } / n_pts_f,
-            all_pts.inject(0.0) { |s, p| s + p.y } / n_pts_f,
-            all_pts.inject(0.0) { |s, p| s + p.z } / n_pts_f
-          )
-          fw          = tr * floor_lcl
-          open_face_w = (fw - aw).length <= (fw - bw).length ? aw : bw
-          n_w         = open_face_w - pc_w
-          dot         = n_w.dot(int_w)
-          result      = dot > 0 ? "inner" : "outer"
-          if result == "outer"
-            lbl = name_of(e)
-            puts "[ALLOY v0.6.6] OUTER: #{lbl} | n_w=(#{n_w.x.round(3)},#{n_w.y.round(3)},#{n_w.z.round(3)}) int_w=(#{int_w.x.round(3)},#{int_w.y.round(3)},#{int_w.z.round(3)}) dot=#{dot.round(4)}"
-          end
-          result
+        # Open-face direction: floor face's own world normal vs cabinet-interior.
+        floor_n_local = faces.first.normal.normalize
+        face_side = if int_w
+          n_w    = (tr * floor_n_local).normalize
+          dot    = n_w.dot(int_w)
+          dot > 0 ? "inner" : "outer"
         else
           (t_val - t_min) <= (t_max - t_val) ? "inner" : "outer"
         end
@@ -229,16 +199,17 @@ module Alloy
         end
 
         cuts << {
-          type:       cut_type,
-          depth_mm:   depth_mm,
-          width_mm:   mm(cut_width_in),
-          length_mm:  mm(cut_length_in),
-          runs_along: axis_label(runs_sym),
-          face:       face_side,
-          u_min_mm:   mm(cu_min - u_origin),
-          u_max_mm:   mm(cu_max - u_origin),
-          v_min_mm:   mm(cv_min - v_origin),
-          v_max_mm:   mm(cv_max - v_origin)
+          type:        cut_type,
+          depth_mm:    depth_mm,
+          width_mm:    mm(cut_width_in),
+          length_mm:   mm(cut_length_in),
+          runs_along:  axis_label(runs_sym),
+          face:        face_side,
+          open_normal: [floor_n_local.x.round(6), floor_n_local.y.round(6), floor_n_local.z.round(6)],
+          u_min_mm:    mm(cu_min - u_origin),
+          u_max_mm:    mm(cu_max - u_origin),
+          v_min_mm:    mm(cv_min - v_origin),
+          v_max_mm:    mm(cv_max - v_origin)
         }
       end
 
@@ -468,26 +439,9 @@ module Alloy
       t_min = coord(bb.min, t_sym)
       t_max = t_min + th
 
-      # World-space face polarity setup (same Fix A as detect_cuts).
-      pc_w = tr * bb.center
-      bc   = bb.center
-      if @cab_center
-        fa_local = case t_sym
-          when :x then Geom::Point3d.new(t_min, bc.y, bc.z)
-          when :y then Geom::Point3d.new(bc.x, t_min, bc.z)
-          when :z then Geom::Point3d.new(bc.x, bc.y, t_min)
-        end
-        fb_local = case t_sym
-          when :x then Geom::Point3d.new(t_max, bc.y, bc.z)
-          when :y then Geom::Point3d.new(bc.x, t_max, bc.z)
-          when :z then Geom::Point3d.new(bc.x, bc.y, t_max)
-        end
-        aw    = tr * fa_local
-        bw    = tr * fb_local
-        int_w = @cab_center - pc_w
-      else
-        aw = bw = int_w = nil
-      end
+      # World-space face polarity: floor face normal vs cabinet-interior direction.
+      pc_w  = tr * bb.center
+      int_w = @cab_center ? @cab_center - pc_w : nil
 
       face_syms = [:x, :y, :z] - [t_sym]
       u_sym    = face_syms[0]
@@ -587,25 +541,11 @@ module Alloy
         longer  = [span_u, span_v].max
         next if shorter < 0.001 || longer / shorter.to_f >= GROOVE_ASPECT  # linear cut, not pocket
 
-        depth_in  = [t_val - t_min, t_max - t_val].min
-        face_side = if aw && int_w
-          f_verts    = f.vertices
-          n_fv       = f_verts.length.to_f
-          floor_lcl  = Geom::Point3d.new(
-            f_verts.inject(0.0) { |s, v| s + v.position.x } / n_fv,
-            f_verts.inject(0.0) { |s, v| s + v.position.y } / n_fv,
-            f_verts.inject(0.0) { |s, v| s + v.position.z } / n_fv
-          )
-          fw          = tr * floor_lcl
-          open_face_w = (fw - aw).length <= (fw - bw).length ? aw : bw
-          n_w         = open_face_w - pc_w
-          dot         = n_w.dot(int_w)
-          result      = dot > 0 ? "inner" : "outer"
-          if result == "outer"
-            lbl = name_of(e)
-            puts "[ALLOY v0.6.6] OUTER pocket: #{lbl} | n_w=(#{n_w.x.round(3)},#{n_w.y.round(3)},#{n_w.z.round(3)}) int_w=(#{int_w.x.round(3)},#{int_w.y.round(3)},#{int_w.z.round(3)}) dot=#{dot.round(4)}"
-          end
-          result
+        depth_in      = [t_val - t_min, t_max - t_val].min
+        floor_n_local = f.normal.normalize
+        face_side = if int_w
+          n_w = (tr * floor_n_local).normalize
+          n_w.dot(int_w) > 0 ? "inner" : "outer"
         else
           (t_val - t_min) <= (t_max - t_val) ? "inner" : "outer"
         end
@@ -617,6 +557,7 @@ module Alloy
         next if uv_pts.length < 3
 
         c = fit_circle(uv_pts)
+        on = [floor_n_local.x.round(6), floor_n_local.y.round(6), floor_n_local.z.round(6)]
         if c && c[:residual] <= ROUND_TOL
           tooling << {
             shape:       "circle",
@@ -625,15 +566,17 @@ module Alloy
             diameter_mm: (2 * c[:r]).round(1),
             cu_mm:       c[:cu].round(1),
             cv_mm:       c[:cv].round(1),
-            face:        face_side
+            face:        face_side,
+            open_normal: on
           }
         else
           tooling << {
-            shape:    "polygon",
-            through:  false,
-            depth_mm: mm(depth_in),
-            loop:     uv_pts,
-            face:     face_side
+            shape:       "polygon",
+            through:     false,
+            depth_mm:    mm(depth_in),
+            loop:        uv_pts,
+            face:        face_side,
+            open_normal: on
           }
         end
       end
