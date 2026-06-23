@@ -393,9 +393,25 @@ export function Cabinet3D({
               }
             }
             if (showCuts && box.cuts && box.cuts.length > 0) {
-              addCutMeshes(lines, box.cuts, box.w, box.h, box.d, true,
-                { x: box.x, y: box.y, z: box.z },
-                { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 });
+              // Cuts in shape space (X=u, Y=v, Z=thickness) — mirror pocket placement
+              for (const cut of box.cuts) {
+                const cuC    = (cut.u_min_mm + cut.u_max_mm) / 2 / 1000 - uMax / 2;
+                const cvC    = (cut.v_min_mm + cut.v_max_mm) / 2 / 1000 - vMax / 2;
+                const cuSz   = (cut.u_max_mm - cut.u_min_mm) / 1000;
+                const cvSz   = (cut.v_max_mm - cut.v_min_mm) / 1000;
+                const cDepth = cut.depth_mm / 1000;
+                const addCutFaceW = (face: "front" | "back") => {
+                  const cZ   = face === "front" ? (-thickness / 2 + cDepth / 2) : (thickness / 2 - cDepth / 2);
+                  const cGeo = new THREE.BoxGeometry(cuSz, cvSz, cDepth);
+                  const eg   = new THREE.EdgesGeometry(cGeo);
+                  const ls   = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x555555 }));
+                  ls.position.set(cuC, cvC, cZ);
+                  lines.add(ls);
+                  cGeo.dispose();
+                };
+                if (cut.face === "front" || cut.face === "both") addCutFaceW("front");
+                if (cut.face === "back"  || cut.face === "both") addCutFaceW("back");
+              }
             }
           } else {
             const mat  = new THREE.MeshStandardMaterial({ color: ROLE_COLOR[box.role] ?? 0xD9D5CE, roughness: 0.8, metalness: 0.02 });
@@ -426,9 +442,25 @@ export function Cabinet3D({
               }
             }
             if (showCuts && box.cuts && box.cuts.length > 0) {
-              addCutMeshes(mesh, box.cuts, box.w, box.h, box.d, false,
-                { x: box.x, y: box.y, z: box.z },
-                { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 });
+              // Cuts in shape space (X=u, Y=v, Z=thickness) — mirror pocket placement
+              for (const cut of box.cuts) {
+                const cuC    = (cut.u_min_mm + cut.u_max_mm) / 2 / 1000 - uMax / 2;
+                const cvC    = (cut.v_min_mm + cut.v_max_mm) / 2 / 1000 - vMax / 2;
+                const cuSz   = (cut.u_max_mm - cut.u_min_mm) / 1000;
+                const cvSz   = (cut.v_max_mm - cut.v_min_mm) / 1000;
+                const cDepth = cut.depth_mm / 1000;
+                const addCutFaceS = (face: "front" | "back") => {
+                  const cZ   = face === "front" ? (-thickness / 2 + cDepth / 2) : (thickness / 2 - cDepth / 2);
+                  const cGeo = new THREE.BoxGeometry(cuSz, cvSz, cDepth);
+                  const cMat = new THREE.MeshStandardMaterial({ color: 0x8A857C, roughness: 0.9, metalness: 0 });
+                  const cMsh = new THREE.Mesh(cGeo, cMat);
+                  cMsh.position.set(cuC, cvC, cZ);
+                  cMsh.add(new THREE.LineSegments(new THREE.EdgesGeometry(cGeo), new THREE.LineBasicMaterial({ color: 0x4A4A42 })));
+                  mesh.add(cMsh);
+                };
+                if (cut.face === "front" || cut.face === "both") addCutFaceS("front");
+                if (cut.face === "back"  || cut.face === "both") addCutFaceS("back");
+              }
             }
           }
           continue;
