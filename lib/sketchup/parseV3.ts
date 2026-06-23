@@ -15,6 +15,7 @@ const SUPPORTED_SCHEMAS = [
   "alloy.sketchup.v5.2",
   "alloy.sketchup.v5.3",
   "alloy.sketchup.v6",
+  "alloy.sketchup.v6.3",
 ] as const;
 
 export type SupportedSchema = (typeof SUPPORTED_SCHEMAS)[number];

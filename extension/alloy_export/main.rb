@@ -1,6 +1,7 @@
-# main.rb — ALLOY Export v0.6.2
-# v0.6.2 = v0.6.1 + dedupe meshes by canonical geometry hash (handles unique-named defs).
-# Schema: alloy.sketchup.v6
+# main.rb — ALLOY Export v0.6.3
+# v0.6.3 = v0.6.2 + tooling[] (round bores + pockets); interior floor faces reclassified
+#           from cuts[] to tooling[].
+# Schema: alloy.sketchup.v6.3
 #
 # Safe: read-only, no model changes, no network.
 
@@ -9,8 +10,8 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.2"
-    SCHEMA  = "alloy.sketchup.v6"
+    VERSION = "0.6.3"
+    SCHEMA  = "alloy.sketchup.v6.3"
     MM      = 25.4   # inches → mm
 
     FITTING_KEYS   = %w[p2o leg_ atira hafele basket l_channel u_channel channel
@@ -20,6 +21,9 @@ module Alloy
     WORKTOP_KEYS   = %w[quartz splash countertop worktop granite marble]
     TRIM_KEYS      = ["plinth", "cornice", "filler", "support box",
                       "wall_l_channel", "external_bottom", "table"]
+
+    EDGE_TOL  = 1.0   # mm — pocket/bore footprint must be this far from every panel edge
+    ROUND_TOL = 0.08  # normalised residual threshold for circle vs polygon classification
 
     def self.mm(v); (v * MM).round(1); end
 
@@ -384,6 +388,157 @@ module Alloy
       }
     end
 
+    # ── Inner tooling detection ───────────────────────────────────────────────
+
+    # Fit a circle to a closed (u,v) loop in mm. Returns {cu,cv,r,residual} or nil.
+    # Requires ≥6 points and r ≥ 2 mm; residual = max(|dist-r|)/r (0 = perfect circle).
+    def self.fit_circle(loop_uv)
+      pts = loop_uv.dup
+      pts.pop if pts.length > 1 && pts.first == pts.last
+      return nil if pts.length < 6
+      cu = pts.inject(0.0) { |s, p| s + p[0] } / pts.length
+      cv = pts.inject(0.0) { |s, p| s + p[1] } / pts.length
+      dists = pts.map { |p| Math.sqrt((p[0] - cu)**2 + (p[1] - cv)**2) }
+      r = dists.inject(0.0, :+) / dists.length
+      return nil if r < 2.0
+      residual = dists.map { |d| (d - r).abs }.max / r
+      { cu: cu, cv: cv, r: r, residual: residual }
+    end
+
+    # Detect through-bores (inner loops of big faces) and blind pockets (interior
+    # intermediate floor faces). Returns tooling[] (possibly empty). Never raises.
+    def self.detect_tooling(e)
+      return [] unless e.is_a?(Sketchup::ComponentInstance)
+
+      defn = e.definition
+      ents = defn.entities
+      bb   = defn.bounds
+
+      bw = bb.width; bh = bb.height; bd = bb.depth
+      return [] if bw < 0.001 || bh < 0.001 || bd < 0.001
+
+      extents = { x: bw, y: bh, z: bd }
+      t_sym, th = extents.min_by { |_, v| v }
+      t_vec = case t_sym
+        when :x then Geom::Vector3d.new(1, 0, 0)
+        when :y then Geom::Vector3d.new(0, 1, 0)
+        when :z then Geom::Vector3d.new(0, 0, 1)
+      end
+      t_min = coord(bb.min, t_sym)
+      t_max = t_min + th
+
+      face_syms = [:x, :y, :z] - [t_sym]
+      u_sym    = face_syms[0]
+      v_sym    = face_syms[1]
+      u_origin = coord(bb.min, u_sym)
+      v_origin = coord(bb.min, v_sym)
+      u_size   = extents[u_sym]
+      v_size   = extents[v_sym]
+
+      tol        = 0.01
+      tooling    = []
+      seen_bores = []  # de-dupe: same through-hole appears on front AND back big face
+
+      # (a) Through-bores: inner loops on the two big (t-parallel) faces
+      ents.each do |f|
+        next unless f.is_a?(Sketchup::Face)
+        next if f.normal.dot(t_vec).abs < (1.0 - tol)
+        t_val = coord(f.vertices.first.position, t_sym)
+        next unless (t_val - t_min).abs <= tol || (t_val - t_max).abs <= tol
+
+        f.loops.each do |lp|
+          next if lp.outer?
+          uv_pts = lp.vertices.map do |vert|
+            p = vert.position
+            [mm(coord(p, u_sym) - u_origin), mm(coord(p, v_sym) - v_origin)]
+          end
+          c = fit_circle(uv_pts)
+          if c && c[:residual] <= ROUND_TOL
+            dup = seen_bores.any? { |b|
+              b[:kind] == :circle &&
+              (b[:cu] - c[:cu]).abs < 1.0 &&
+              (b[:cv] - c[:cv]).abs < 1.0 &&
+              (b[:r]  - c[:r] ).abs < 1.0
+            }
+            next if dup
+            seen_bores << { kind: :circle, cu: c[:cu], cv: c[:cv], r: c[:r] }
+            tooling << {
+              shape:       "circle",
+              through:     true,
+              depth_mm:    mm(th),
+              diameter_mm: (2 * c[:r]).round(1),
+              cu_mm:       c[:cu].round(1),
+              cv_mm:       c[:cv].round(1),
+              face:        "both"
+            }
+          else
+            key = uv_pts.map { |p| [p[0].round, p[1].round] }.sort.first(3).inspect
+            dup = seen_bores.any? { |b| b[:kind] == :polygon && b[:key] == key }
+            next if dup
+            seen_bores << { kind: :polygon, key: key }
+            tooling << {
+              shape:    "polygon",
+              through:  true,
+              depth_mm: mm(th),
+              loop:     uv_pts,
+              face:     "both"
+            }
+          end
+        end
+      end
+
+      # (b) Blind pockets: interior intermediate floor faces (touch no panel edge)
+      ents.each do |f|
+        next unless f.is_a?(Sketchup::Face)
+        next if f.normal.dot(t_vec).abs < (1.0 - tol)
+        t_val = coord(f.vertices.first.position, t_sym)
+        next if t_val <= t_min + tol || t_val >= t_max - tol  # skip big faces
+
+        u_vals = f.vertices.map { |vert| coord(vert.position, u_sym) }
+        v_vals = f.vertices.map { |vert| coord(vert.position, v_sym) }
+        fu_min = u_vals.min; fu_max = u_vals.max
+        fv_min = v_vals.min; fv_max = v_vals.max
+
+        at_u_edge = fu_min <= u_origin + tol || fu_max >= u_origin + u_size - tol
+        at_v_edge = fv_min <= v_origin + tol || fv_max >= v_origin + v_size - tol
+        next if at_u_edge || at_v_edge  # edge-touching → already in cuts[], not a pocket
+
+        depth_in  = [t_val - t_min, t_max - t_val].min
+        face_side = (t_val - t_min) <= (t_max - t_val) ? "front" : "back"
+
+        uv_pts = f.outer_loop.vertices.map do |vert|
+          p = vert.position
+          [mm(coord(p, u_sym) - u_origin), mm(coord(p, v_sym) - v_origin)]
+        end
+        next if uv_pts.length < 3
+
+        c = fit_circle(uv_pts)
+        if c && c[:residual] <= ROUND_TOL
+          tooling << {
+            shape:       "circle",
+            through:     false,
+            depth_mm:    mm(depth_in),
+            diameter_mm: (2 * c[:r]).round(1),
+            cu_mm:       c[:cu].round(1),
+            cv_mm:       c[:cv].round(1),
+            face:        face_side
+          }
+        else
+          tooling << {
+            shape:    "polygon",
+            through:  false,
+            depth_mm: mm(depth_in),
+            loop:     uv_pts,
+            face:     face_side
+          }
+        end
+      end
+
+      tooling
+    rescue
+      []
+    end
+
     # ── Fitting mesh extraction (deduped by canonical geometry hash) ─────────
     # Meshes are keyed by a content hash so geometrically identical definitions
     # (even with distinct #NN names from "Make Unique") share one cache entry.
@@ -453,8 +608,9 @@ module Alloy
         node[:role]    = "part"
         node[:is_leaf] = true
         if has_any?(node[:name], FITTING_KEYS)
-          # Fittings (legs, hinges, channels, etc.) — skip cut detection entirely.
-          node[:cuts] = []
+          # Fittings (legs, hinges, channels, etc.) — skip cut/tooling detection entirely.
+          node[:cuts]    = []
+          node[:tooling] = []
           # Non-channel fittings get a deduplicated mesh reference.
           if !has_any?(node[:name], ["l_channel","u_channel","channel"])
             mk = (e.is_a?(Sketchup::ComponentInstance) ? definition_mesh(e.definition) : nil)
@@ -464,9 +620,22 @@ module Alloy
           result = detect_cuts(e)
           if result == :complex
             node[:cuts]        = []
+            node[:tooling]     = []
             node[:cut_warning] = "complex geometry, skipped"
           else
-            node[:cuts] = result
+            unless result.empty?
+              # Strip interior-floor cuts (no edge touch) — they become tooling pockets.
+              ext = { x: mm(bb.width), y: mm(bb.height), z: mm(bb.depth) }
+              t_s, _ = ext.min_by { |_, v| v }
+              fs = [:x, :y, :z] - [t_s]
+              u_full = ext[fs[0]]; v_full = ext[fs[1]]
+              result = result.select { |c|
+                c[:u_min_mm] <= EDGE_TOL || c[:u_max_mm] >= u_full - EDGE_TOL ||
+                c[:v_min_mm] <= EDGE_TOL || c[:v_max_mm] >= v_full - EDGE_TOL
+              }
+            end
+            node[:cuts]    = result
+            node[:tooling] = detect_tooling(e)
           end
         end
         ol = face_outline(e)
