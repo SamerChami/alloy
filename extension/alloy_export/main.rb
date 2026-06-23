@@ -122,11 +122,11 @@ module Alloy
           when :y then Geom::Point3d.new(bc.x, t_max, bc.z)
           when :z then Geom::Point3d.new(bc.x, bc.y, t_max)
         end
-        Aw    = tr * fa_local
-        Bw    = tr * fb_local
+        aw    = tr * fa_local
+        bw    = tr * fb_local
         int_w = @cab_center - pc_w
       else
-        Aw = Bw = int_w = nil
+        aw = bw = int_w = nil
       end
 
       # The two face-plane axes (everything except T)
@@ -192,15 +192,15 @@ module Alloy
         end
 
         # Open face in world space: which big face is the floor centroid nearer to?
-        face_side = if Aw && int_w
+        face_side = if aw && int_w
           n_pts_f    = all_pts.length.to_f
           floor_lcl  = Geom::Point3d.new(
             all_pts.inject(0.0) { |s, p| s + p.x } / n_pts_f,
             all_pts.inject(0.0) { |s, p| s + p.y } / n_pts_f,
             all_pts.inject(0.0) { |s, p| s + p.z } / n_pts_f
           )
-          Fw          = tr * floor_lcl
-          open_face_w = (Fw - Aw).length <= (Fw - Bw).length ? Aw : Bw
+          fw          = tr * floor_lcl
+          open_face_w = (fw - aw).length <= (fw - bw).length ? aw : bw
           n_w         = open_face_w - pc_w
           dot         = n_w.dot(int_w)
           result      = dot > 0 ? "inner" : "outer"
@@ -482,11 +482,11 @@ module Alloy
           when :y then Geom::Point3d.new(bc.x, t_max, bc.z)
           when :z then Geom::Point3d.new(bc.x, bc.y, t_max)
         end
-        Aw    = tr * fa_local
-        Bw    = tr * fb_local
+        aw    = tr * fa_local
+        bw    = tr * fb_local
         int_w = @cab_center - pc_w
       else
-        Aw = Bw = int_w = nil
+        aw = bw = int_w = nil
       end
 
       face_syms = [:x, :y, :z] - [t_sym]
@@ -588,7 +588,7 @@ module Alloy
         next if shorter < 0.001 || longer / shorter.to_f >= GROOVE_ASPECT  # linear cut, not pocket
 
         depth_in  = [t_val - t_min, t_max - t_val].min
-        face_side = if Aw && int_w
+        face_side = if aw && int_w
           f_verts    = f.vertices
           n_fv       = f_verts.length.to_f
           floor_lcl  = Geom::Point3d.new(
@@ -596,8 +596,8 @@ module Alloy
             f_verts.inject(0.0) { |s, v| s + v.position.y } / n_fv,
             f_verts.inject(0.0) { |s, v| s + v.position.z } / n_fv
           )
-          Fw          = tr * floor_lcl
-          open_face_w = (Fw - Aw).length <= (Fw - Bw).length ? Aw : Bw
+          fw          = tr * floor_lcl
+          open_face_w = (fw - aw).length <= (fw - bw).length ? aw : bw
           n_w         = open_face_w - pc_w
           dot         = n_w.dot(int_w)
           result      = dot > 0 ? "inner" : "outer"
