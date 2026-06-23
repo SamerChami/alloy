@@ -2,8 +2,8 @@
 // v3/v4 export nested component trees; leaves (is_leaf:true) are the actual panels/fittings.
 // v4 adds per-leaf `cuts[]` and optional `cut_warning`; top-level `total_parts` and `version`.
 
-import type { Cut } from "./types";
-export type { Cut };
+import type { Cut, ToolingItem } from "./types";
+export type { Cut, ToolingItem };
 
 // ── Schema validation ────────────────────────────────────────────────────────
 
@@ -59,6 +59,8 @@ export type V3Node = {
   };
   // v6 fields (non-channel fitting leaves only)
   mesh_ref?: string;
+  // v6.3 fields (panel leaves only)
+  tooling?: ToolingItem[];
 };
 
 export type V3Json = {
@@ -107,6 +109,8 @@ export type V3Part = {
   };
   // v6: reference into the top-level meshes dict
   mesh_ref?: string;
+  // v6.3: inner tooling features (bores + blind pockets) per panel leaf
+  tooling?: ToolingItem[];
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -154,6 +158,8 @@ export function cabinetToParts(root: V3Node): { panels: V3Part[]; fittings: V3Pa
       profile_mm: leaf.profile_mm,
       // carry v6 mesh reference; leave undefined when absent
       mesh_ref: leaf.mesh_ref,
+      // carry v6.3 tooling; leave undefined when absent
+      tooling: leaf.tooling,
     };
     if (part.isFitting) fittings.push(part);
     else panels.push(part);

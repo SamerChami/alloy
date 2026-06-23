@@ -335,6 +335,23 @@ export function Cabinet3D({
           shape.moveTo(ol.loop[0][0] / 1000, ol.loop[0][1] / 1000);
           for (let i = 1; i < ol.loop.length; i++) shape.lineTo(ol.loop[i][0] / 1000, ol.loop[i][1] / 1000);
           shape.closePath();
+          // Through-bores: push circular/polygon hole paths so ExtrudeGeometry opens them end-to-end
+          if (box.tooling) {
+            for (const ti of box.tooling) {
+              if (!ti.through) continue;
+              if (ti.shape === "circle" && ti.cu_mm != null && ti.cv_mm != null && ti.diameter_mm != null) {
+                const hp = new THREE.Path();
+                hp.absarc(ti.cu_mm / 1000, ti.cv_mm / 1000, ti.diameter_mm / 2 / 1000, 0, Math.PI * 2, true);
+                shape.holes.push(hp);
+              } else if (ti.shape === "polygon" && ti.loop) {
+                const hp = new THREE.Path();
+                hp.moveTo(ti.loop[0][0] / 1000, ti.loop[0][1] / 1000);
+                for (let j = 1; j < ti.loop.length; j++) hp.lineTo(ti.loop[j][0] / 1000, ti.loop[j][1] / 1000);
+                hp.closePath();
+                shape.holes.push(hp);
+              }
+            }
+          }
           const extGeo = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false });
           extGeo.translate(-uMax / 2, -vMax / 2, -thickness / 2);
           // Map shape local axes (X=u, Y=v, Z=thickness) → three-world via orient columns
@@ -359,6 +376,22 @@ export function Cabinet3D({
             lines.position.set(box.x, box.y, box.z);
             group.add(lines);
             extGeo.dispose();
+            // Wireframe blind pocket rings
+            if (box.tooling) {
+              for (const ti of box.tooling) {
+                if (ti.through || ti.shape !== "circle" || ti.cu_mm == null || ti.cv_mm == null || ti.diameter_mm == null) continue;
+                const pr = ti.diameter_mm / 2 / 1000;
+                const pd = ti.depth_mm / 1000;
+                const discGeo = new THREE.CylinderGeometry(pr, pr, pd, 48);
+                discGeo.rotateX(Math.PI / 2);
+                const pFaceZ = ti.face === "front" ? (-thickness / 2 + pd / 2) : (thickness / 2 - pd / 2);
+                const eg = new THREE.EdgesGeometry(discGeo);
+                const dl = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: ROLE_COLOR[box.role] ?? 0x888880 }));
+                dl.position.set(ti.cu_mm / 1000 - uMax / 2, ti.cv_mm / 1000 - vMax / 2, pFaceZ);
+                lines.add(dl);
+                discGeo.dispose();
+              }
+            }
             if (showCuts && box.cuts && box.cuts.length > 0) {
               addCutMeshes(lines, box.cuts, box.w, box.h, box.d, true,
                 { x: box.x, y: box.y, z: box.z },
@@ -374,6 +407,24 @@ export function Cabinet3D({
             mesh.receiveShadow = true;
             group.add(mesh);
             mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(extGeo), new THREE.LineBasicMaterial({ color: 0x5a5a52 })));
+            // Blind pocket discs (through:false) — same-material disc recessed into named face
+            if (box.tooling) {
+              for (const ti of box.tooling) {
+                if (ti.through || ti.shape !== "circle" || ti.cu_mm == null || ti.cv_mm == null || ti.diameter_mm == null) continue;
+                const pr = ti.diameter_mm / 2 / 1000;
+                const pd = ti.depth_mm / 1000;
+                const discGeo = new THREE.CylinderGeometry(pr, pr, pd, 48);
+                discGeo.rotateX(Math.PI / 2);
+                const discMat = (mat as THREE.MeshStandardMaterial).clone();
+                const disc = new THREE.Mesh(discGeo, discMat);
+                const pFaceZ = ti.face === "front" ? (-thickness / 2 + pd / 2) : (thickness / 2 - pd / 2);
+                disc.position.set(ti.cu_mm / 1000 - uMax / 2, ti.cv_mm / 1000 - vMax / 2, pFaceZ);
+                disc.castShadow = true;
+                disc.receiveShadow = true;
+                disc.add(new THREE.LineSegments(new THREE.EdgesGeometry(discGeo), new THREE.LineBasicMaterial({ color: 0x5a5a52 })));
+                mesh.add(disc);
+              }
+            }
             if (showCuts && box.cuts && box.cuts.length > 0) {
               addCutMeshes(mesh, box.cuts, box.w, box.h, box.d, false,
                 { x: box.x, y: box.y, z: box.z },

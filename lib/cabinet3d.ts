@@ -1,4 +1,4 @@
-import type { Cut } from "@/lib/sketchup/types";
+import type { Cut, ToolingItem } from "@/lib/sketchup/types";
 
 export const PART_ROLES = [
   "side_left",
@@ -59,6 +59,7 @@ export type Box3D = {
   outline?: PanelOutline;   // v5.1: true 2D silhouette; renderer extrudes when present
   profile?: ChannelProfile; // v5.3: channel cross-section; renderer extrudes along run
   mesh_ref?: string;        // v6: key into meshes dict; renderer builds BufferGeometry
+  tooling?: ToolingItem[];  // v6.3: inner tooling features (bores + blind pockets)
 };
 
 // Minimal panel shape for real-position 3D rendering (satisfied by ImportedPanel).
@@ -312,6 +313,7 @@ export type SkuPanel3D = {
   outline_mm?: PanelOutline;                          // v5.1 true 2D silhouette
   profile_mm?: ChannelProfile;                        // v5.3 channel cross-section
   mesh_ref?: string;                                  // v6 reference into top-level meshes dict
+  tooling_mm?: ToolingItem[];                         // v6.3 inner tooling features
 };
 
 // Oriented build path for v5 exports where every panel carries `axes`.
@@ -357,7 +359,7 @@ function buildBoxesFromOrientedPanels(
         z: center.z + col0[2]*sx*hW + col1[2]*sy*hH + col2[2]*sz*hD,
       });
     }
-    return { role, part_name: p.part_name, bw, bh, bd, center, orient, corners, cuts: p.cuts, outline_mm: p.outline_mm, profile_mm: p.profile_mm, mesh_ref: p.mesh_ref };
+    return { role, part_name: p.part_name, bw, bh, bd, center, orient, corners, cuts: p.cuts, outline_mm: p.outline_mm, profile_mm: p.profile_mm, mesh_ref: p.mesh_ref, tooling_mm: p.tooling_mm };
   });
 
   // Global min-corner across all panel AABBs → shift cabinet to origin
@@ -387,7 +389,7 @@ function buildBoxesFromOrientedPanels(
       }
     }
 
-    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name, cuts: p.cuts, orient: p.orient, uprightCylinder: isUprightCylinderFitting(p.part_name ?? ""), outline: p.outline_mm, profile: p.profile_mm, mesh_ref: p.mesh_ref });
+    boxes.push({ w: p.bw, h: p.bh, d: p.bd, x, y, z, role, part_name: p.part_name, cuts: p.cuts, orient: p.orient, uprightCylinder: isUprightCylinderFitting(p.part_name ?? ""), outline: p.outline_mm, profile: p.profile_mm, mesh_ref: p.mesh_ref, tooling: p.tooling_mm });
   }
 
   return boxes;

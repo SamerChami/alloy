@@ -220,6 +220,7 @@ export function ProjectImportShell() {
           outline_mm: part.outline_mm,
           profile_mm: part.profile_mm,
           mesh_ref: part.mesh_ref,
+          tooling_mm: part.tooling,
         }));
       })()
     : undefined;
