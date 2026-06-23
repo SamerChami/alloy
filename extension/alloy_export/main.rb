@@ -1,7 +1,6 @@
-# main.rb — ALLOY Export v0.6.3
-# v0.6.3 = v0.6.2 + tooling[] (round bores + pockets); interior floor faces reclassified
-#           from cuts[] to tooling[].
-# Schema: alloy.sketchup.v6.3
+# main.rb — ALLOY Export v0.6.4
+# v0.6.4 = v0.6.3 + aspect-ratio groove/pocket classifier; through-bores exclude
+#           blind floor faces; de-dup. Schema stays alloy.sketchup.v6.3.
 #
 # Safe: read-only, no model changes, no network.
 
@@ -10,7 +9,7 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.3"
+    VERSION = "0.6.4"
     SCHEMA  = "alloy.sketchup.v6.3"
     MM      = 25.4   # inches → mm
 
@@ -22,8 +21,9 @@ module Alloy
     TRIM_KEYS      = ["plinth", "cornice", "filler", "support box",
                       "wall_l_channel", "external_bottom", "table"]
 
-    EDGE_TOL  = 1.0   # mm — pocket/bore footprint must be this far from every panel edge
-    ROUND_TOL = 0.08  # normalised residual threshold for circle vs polygon classification
+    EDGE_TOL     = 1.0   # mm — used in detect_cuts rabbet/groove classification
+    ROUND_TOL    = 0.08  # normalised residual threshold for circle vs polygon classification
+    GROOVE_ASPECT = 4.0  # floor-face aspect ratio ≥ this → linear groove/dado → cuts[]; < this → pocket → tooling[]
 
     def self.mm(v); (v * MM).round(1); end
 
@@ -452,6 +452,25 @@ module Alloy
             p = vert.position
             [mm(coord(p, u_sym) - u_origin), mm(coord(p, v_sym) - v_origin)]
           end
+          pts_clean = uv_pts.dup
+          pts_clean.pop if pts_clean.length > 1 && pts_clean.first == pts_clean.last
+          next if pts_clean.length < 3
+
+          # Bore centre in SU-local inches; skip if any intermediate floor face covers it.
+          cu_in = pts_clean.inject(0.0) { |s, p| s + p[0] } / pts_clean.length / MM + u_origin
+          cv_in = pts_clean.inject(0.0) { |s, p| s + p[1] } / pts_clean.length / MM + v_origin
+          covered = ents.any? { |ff|
+            next false unless ff.is_a?(Sketchup::Face)
+            next false if ff.normal.dot(t_vec).abs < (1.0 - tol)
+            ff_t = coord(ff.vertices.first.position, t_sym)
+            next false if ff_t <= t_min + tol || ff_t >= t_max - tol
+            ff_u = ff.vertices.map { |vt| coord(vt.position, u_sym) }
+            ff_v = ff.vertices.map { |vt| coord(vt.position, v_sym) }
+            cu_in >= ff_u.min - tol && cu_in <= ff_u.max + tol &&
+            cv_in >= ff_v.min - tol && cv_in <= ff_v.max + tol
+          }
+          next if covered  # blind feature; floor-face pipeline handles it
+
           c = fit_circle(uv_pts)
           if c && c[:residual] <= ROUND_TOL
             dup = seen_bores.any? { |b|
@@ -499,9 +518,11 @@ module Alloy
         fu_min = u_vals.min; fu_max = u_vals.max
         fv_min = v_vals.min; fv_max = v_vals.max
 
-        at_u_edge = fu_min <= u_origin + tol || fu_max >= u_origin + u_size - tol
-        at_v_edge = fv_min <= v_origin + tol || fv_max >= v_origin + v_size - tol
-        next if at_u_edge || at_v_edge  # edge-touching → already in cuts[], not a pocket
+        span_u  = fu_max - fu_min
+        span_v  = fv_max - fv_min
+        shorter = [span_u, span_v].min
+        longer  = [span_u, span_v].max
+        next if shorter < 0.001 || longer / shorter.to_f >= GROOVE_ASPECT  # linear cut, not pocket
 
         depth_in  = [t_val - t_min, t_max - t_val].min
         face_side = (t_val - t_min) <= (t_max - t_val) ? "front" : "back"
@@ -630,8 +651,9 @@ module Alloy
               fs = [:x, :y, :z] - [t_s]
               u_full = ext[fs[0]]; v_full = ext[fs[1]]
               result = result.select { |c|
-                c[:u_min_mm] <= EDGE_TOL || c[:u_max_mm] >= u_full - EDGE_TOL ||
-                c[:v_min_mm] <= EDGE_TOL || c[:v_max_mm] >= v_full - EDGE_TOL
+                shorter = [c[:width_mm], c[:length_mm]].min
+                longer  = [c[:width_mm], c[:length_mm]].max
+                shorter < 1.0 || longer / shorter.to_f >= GROOVE_ASPECT
               }
             end
             node[:cuts]    = result
