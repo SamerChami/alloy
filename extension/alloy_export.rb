@@ -7,7 +7,7 @@ require "extensions.rb"
 module Alloy
   module Export
     EXT = SketchupExtension.new("ALLOY Export", "alloy_export/main")
-    EXT.version     = "0.6.5"
+    EXT.version     = "0.6.6"
     EXT.creator     = "ALLOY"
     EXT.description = "Export cabinet components to JSON for the ALLOY app."
     Sketchup.register_extension(EXT, true)

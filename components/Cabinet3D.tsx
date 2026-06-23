@@ -386,7 +386,7 @@ export function Cabinet3D({
                 const pd = ti.depth_mm / 1000;
                 const discGeo = new THREE.CylinderGeometry(pr, pr, pd, 48);
                 discGeo.rotateX(Math.PI / 2);
-                const pFaceZ = (ti.face === "inner" || ti.face === "front")
+                const pFaceZ = ti.face === "inner"
                   ? szSign * (thickness / 2 - pd / 2)
                   : -szSign * (thickness / 2 - pd / 2);
                 const eg = new THREE.EdgesGeometry(discGeo);
@@ -414,8 +414,8 @@ export function Cabinet3D({
                   cGeo.dispose();
                 };
                 const cf = cut.face as string;
-                if (cf === "inner" || cf === "front" || cf === "both") addCutFaceW("inner");
-                if (cf === "outer" || cf === "back"  || cf === "both") addCutFaceW("outer");
+                if (cf === "inner" || cf === "both") addCutFaceW("inner");
+                if (cf === "outer" || cf === "both") addCutFaceW("outer");
               }
             }
           } else {
@@ -438,7 +438,7 @@ export function Cabinet3D({
                 discGeo.rotateX(Math.PI / 2);
                 const discMat = (mat as THREE.MeshStandardMaterial).clone();
                 const disc = new THREE.Mesh(discGeo, discMat);
-                const pFaceZ = (ti.face === "inner" || ti.face === "front")
+                const pFaceZ = ti.face === "inner"
                   ? szSign * (thickness / 2 - pd / 2)
                   : -szSign * (thickness / 2 - pd / 2);
                 disc.position.set(ti.cu_mm / 1000 - uMax / 2, ti.cv_mm / 1000 - vMax / 2, pFaceZ);
@@ -466,8 +466,8 @@ export function Cabinet3D({
                   mesh.add(cMsh);
                 };
                 const cf = cut.face as string;
-                if (cf === "inner" || cf === "front" || cf === "both") addCutFaceS("inner");
-                if (cf === "outer" || cf === "back"  || cf === "both") addCutFaceS("outer");
+                if (cf === "inner" || cf === "both") addCutFaceS("inner");
+                if (cf === "outer" || cf === "both") addCutFaceS("outer");
               }
             }
           }

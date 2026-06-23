@@ -1,7 +1,6 @@
-# main.rb — ALLOY Export v0.6.5
-# v0.6.5 = v0.6.4 + cabinet-relative face polarity (inner/outer) for cuts &
-#           tooling; fixes mirrored side panels and shelf pocket face.
-#           Schema stays alloy.sketchup.v6.3.
+# main.rb — ALLOY Export v0.6.6
+# v0.6.6 = v0.6.5-FIX: open face computed in world space (mirror-stable,
+#           correct polarity); viewer reads inner/outer. Schema alloy.sketchup.v6.3.
 #
 # Safe: read-only, no model changes, no network.
 
@@ -10,7 +9,7 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.5"
+    VERSION = "0.6.6"
     SCHEMA  = "alloy.sketchup.v6.3"
     MM      = 25.4   # inches → mm
 
@@ -108,15 +107,27 @@ module Alloy
       t_min = coord(bb.min, t_sym)
       t_max = t_min + th
 
-      # World-relative face direction: transform local t-axis to world and compare
-      # to the direction from panel centre toward the cabinet centre.
-      t_world_dir = case t_sym
-        when :x then tr.xaxis.normalize
-        when :y then tr.yaxis.normalize
-        when :z then tr.zaxis.normalize
+      # World-space face polarity (Fix A): use world positions of floor centroid
+      # and the two big-face centers — no local normal transform needed.
+      pc_w = tr * bb.center
+      bc   = bb.center
+      if @cab_center
+        fa_local = case t_sym
+          when :x then Geom::Point3d.new(t_min, bc.y, bc.z)
+          when :y then Geom::Point3d.new(bc.x, t_min, bc.z)
+          when :z then Geom::Point3d.new(bc.x, bc.y, t_min)
+        end
+        fb_local = case t_sym
+          when :x then Geom::Point3d.new(t_max, bc.y, bc.z)
+          when :y then Geom::Point3d.new(bc.x, t_max, bc.z)
+          when :z then Geom::Point3d.new(bc.x, bc.y, t_max)
+        end
+        Aw    = tr * fa_local
+        Bw    = tr * fb_local
+        int_w = @cab_center - pc_w
+      else
+        Aw = Bw = int_w = nil
       end
-      pc_world = tr * bb.center
-      int_vec  = @cab_center ? (@cab_center - pc_world) : nil
 
       # The two face-plane axes (everything except T)
       face_syms = [:x, :y, :z] - [t_sym]
@@ -180,10 +191,24 @@ module Alloy
           runs_sym      = u_sym
         end
 
-        # Cabinet-relative face: open normal dotted against interior direction.
-        open_sign = (t_val - t_min) <= (t_max - t_val) ? -1.0 : 1.0
-        face_side = if int_vec && int_vec.length > tol
-          (open_sign * t_world_dir.dot(int_vec)) >= 0 ? "inner" : "outer"
+        # Open face in world space: which big face is the floor centroid nearer to?
+        face_side = if Aw && int_w
+          n_pts_f    = all_pts.length.to_f
+          floor_lcl  = Geom::Point3d.new(
+            all_pts.inject(0.0) { |s, p| s + p.x } / n_pts_f,
+            all_pts.inject(0.0) { |s, p| s + p.y } / n_pts_f,
+            all_pts.inject(0.0) { |s, p| s + p.z } / n_pts_f
+          )
+          Fw          = tr * floor_lcl
+          open_face_w = (Fw - Aw).length <= (Fw - Bw).length ? Aw : Bw
+          n_w         = open_face_w - pc_w
+          dot         = n_w.dot(int_w)
+          result      = dot > 0 ? "inner" : "outer"
+          if result == "outer"
+            lbl = name_of(e)
+            puts "[ALLOY v0.6.6] OUTER: #{lbl} | n_w=(#{n_w.x.round(3)},#{n_w.y.round(3)},#{n_w.z.round(3)}) int_w=(#{int_w.x.round(3)},#{int_w.y.round(3)},#{int_w.z.round(3)}) dot=#{dot.round(4)}"
+          end
+          result
         else
           (t_val - t_min) <= (t_max - t_val) ? "inner" : "outer"
         end
@@ -443,14 +468,26 @@ module Alloy
       t_min = coord(bb.min, t_sym)
       t_max = t_min + th
 
-      # World-relative face direction (same principle as detect_cuts).
-      t_world_dir = case t_sym
-        when :x then tr.xaxis.normalize
-        when :y then tr.yaxis.normalize
-        when :z then tr.zaxis.normalize
+      # World-space face polarity setup (same Fix A as detect_cuts).
+      pc_w = tr * bb.center
+      bc   = bb.center
+      if @cab_center
+        fa_local = case t_sym
+          when :x then Geom::Point3d.new(t_min, bc.y, bc.z)
+          when :y then Geom::Point3d.new(bc.x, t_min, bc.z)
+          when :z then Geom::Point3d.new(bc.x, bc.y, t_min)
+        end
+        fb_local = case t_sym
+          when :x then Geom::Point3d.new(t_max, bc.y, bc.z)
+          when :y then Geom::Point3d.new(bc.x, t_max, bc.z)
+          when :z then Geom::Point3d.new(bc.x, bc.y, t_max)
+        end
+        Aw    = tr * fa_local
+        Bw    = tr * fb_local
+        int_w = @cab_center - pc_w
+      else
+        Aw = Bw = int_w = nil
       end
-      pc_world = tr * bb.center
-      int_vec  = @cab_center ? (@cab_center - pc_world) : nil
 
       face_syms = [:x, :y, :z] - [t_sym]
       u_sym    = face_syms[0]
@@ -551,9 +588,24 @@ module Alloy
         next if shorter < 0.001 || longer / shorter.to_f >= GROOVE_ASPECT  # linear cut, not pocket
 
         depth_in  = [t_val - t_min, t_max - t_val].min
-        open_sign = (t_val - t_min) <= (t_max - t_val) ? -1.0 : 1.0
-        face_side = if int_vec && int_vec.length > tol
-          (open_sign * t_world_dir.dot(int_vec)) >= 0 ? "inner" : "outer"
+        face_side = if Aw && int_w
+          f_verts    = f.vertices
+          n_fv       = f_verts.length.to_f
+          floor_lcl  = Geom::Point3d.new(
+            f_verts.inject(0.0) { |s, v| s + v.position.x } / n_fv,
+            f_verts.inject(0.0) { |s, v| s + v.position.y } / n_fv,
+            f_verts.inject(0.0) { |s, v| s + v.position.z } / n_fv
+          )
+          Fw          = tr * floor_lcl
+          open_face_w = (Fw - Aw).length <= (Fw - Bw).length ? Aw : Bw
+          n_w         = open_face_w - pc_w
+          dot         = n_w.dot(int_w)
+          result      = dot > 0 ? "inner" : "outer"
+          if result == "outer"
+            lbl = name_of(e)
+            puts "[ALLOY v0.6.6] OUTER pocket: #{lbl} | n_w=(#{n_w.x.round(3)},#{n_w.y.round(3)},#{n_w.z.round(3)}) int_w=(#{int_w.x.round(3)},#{int_w.y.round(3)},#{int_w.z.round(3)}) dot=#{dot.round(4)}"
+          end
+          result
         else
           (t_val - t_min) <= (t_max - t_val) ? "inner" : "outer"
         end
