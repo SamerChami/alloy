@@ -386,9 +386,8 @@ export function Cabinet3D({
                 const pd = ti.depth_mm / 1000;
                 const discGeo = new THREE.CylinderGeometry(pr, pr, pd, 48);
                 discGeo.rotateX(Math.PI / 2);
-                const pFaceZ = ti.face === "inner"
-                  ? szSign * (thickness / 2 - pd / 2)
-                  : -szSign * (thickness / 2 - pd / 2);
+                const ptSign = ti.open_normal != null ? ti.open_normal[tI] : (ti.face === "inner" ? szSign : -szSign);
+                const pFaceZ = ptSign * (thickness / 2 - pd / 2);
                 const eg = new THREE.EdgesGeometry(discGeo);
                 const dl = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: ROLE_COLOR[box.role] ?? 0x888880 }));
                 dl.position.set(ti.cu_mm / 1000 - uMax / 2, ti.cv_mm / 1000 - vMax / 2, pFaceZ);
@@ -404,8 +403,9 @@ export function Cabinet3D({
                 const cuSz   = (cut.u_max_mm - cut.u_min_mm) / 1000;
                 const cvSz   = (cut.v_max_mm - cut.v_min_mm) / 1000;
                 const cDepth = cut.depth_mm / 1000;
+                const onSignW = cut.open_normal != null ? cut.open_normal[tI] : szSign;
                 const addCutFaceW = (side: "inner" | "outer") => {
-                  const cZ   = side === "inner" ? szSign * (thickness / 2 - cDepth / 2) : -szSign * (thickness / 2 - cDepth / 2);
+                  const cZ   = side === "inner" ? onSignW * (thickness / 2 - cDepth / 2) : -onSignW * (thickness / 2 - cDepth / 2);
                   const cGeo = new THREE.BoxGeometry(cuSz, cvSz, cDepth);
                   const eg   = new THREE.EdgesGeometry(cGeo);
                   const ls   = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x555555 }));
@@ -438,9 +438,8 @@ export function Cabinet3D({
                 discGeo.rotateX(Math.PI / 2);
                 const discMat = (mat as THREE.MeshStandardMaterial).clone();
                 const disc = new THREE.Mesh(discGeo, discMat);
-                const pFaceZ = ti.face === "inner"
-                  ? szSign * (thickness / 2 - pd / 2)
-                  : -szSign * (thickness / 2 - pd / 2);
+                const ptSign = ti.open_normal != null ? ti.open_normal[tI] : (ti.face === "inner" ? szSign : -szSign);
+                const pFaceZ = ptSign * (thickness / 2 - pd / 2);
                 disc.position.set(ti.cu_mm / 1000 - uMax / 2, ti.cv_mm / 1000 - vMax / 2, pFaceZ);
                 disc.castShadow = true;
                 disc.receiveShadow = true;
@@ -456,8 +455,9 @@ export function Cabinet3D({
                 const cuSz   = (cut.u_max_mm - cut.u_min_mm) / 1000;
                 const cvSz   = (cut.v_max_mm - cut.v_min_mm) / 1000;
                 const cDepth = cut.depth_mm / 1000;
+                const onSignS = cut.open_normal != null ? cut.open_normal[tI] : szSign;
                 const addCutFaceS = (side: "inner" | "outer") => {
-                  const cZ   = side === "inner" ? szSign * (thickness / 2 - cDepth / 2) : -szSign * (thickness / 2 - cDepth / 2);
+                  const cZ   = side === "inner" ? onSignS * (thickness / 2 - cDepth / 2) : -onSignS * (thickness / 2 - cDepth / 2);
                   const cGeo = new THREE.BoxGeometry(cuSz, cvSz, cDepth);
                   const cMat = new THREE.MeshStandardMaterial({ color: 0x8A857C, roughness: 0.9, metalness: 0 });
                   const cMsh = new THREE.Mesh(cGeo, cMat);
@@ -761,9 +761,11 @@ function addCutMeshes(
       const panelT = tAxis === "x" ? panelCenter.x : tAxis === "y" ? panelCenter.y : panelCenter.z;
       const cabT   = tAxis === "x" ? cabinetCenter.x : tAxis === "y" ? cabinetCenter.y : cabinetCenter.z;
       const interiorSign = (cabT - panelT) >= 0 ? 1 : -1;
+      const tIdx = tAxis === "x" ? 0 : tAxis === "y" ? 1 : 2;
+      const effectiveSign = cut.open_normal != null ? cut.open_normal[tIdx] : interiorSign;
       pos[tAxis] = side === "inner"
-        ? interiorSign * (thickness / 2 - depth / 2)
-        : -interiorSign * (thickness / 2 - depth / 2);
+        ? effectiveSign * (thickness / 2 - depth / 2)
+        : -effectiveSign * (thickness / 2 - depth / 2);
 
       const geo = new THREE.BoxGeometry(sz.x, sz.y, sz.z);
       if (wireframe) {
@@ -783,8 +785,8 @@ function addCutMeshes(
     }
 
     const cf = cut.face as string;
-    if (cf === "inner" || cf === "front" || cf === "both") drawFace("inner");
-    if (cf === "outer" || cf === "back"  || cf === "both") drawFace("outer");
+    if (cf === "inner" || cf === "both") drawFace("inner");
+    if (cf === "outer" || cf === "both") drawFace("outer");
   }
 }
 
