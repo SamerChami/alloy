@@ -1,6 +1,7 @@
-# main.rb — ALLOY Export v0.6.4
-# v0.6.4 = v0.6.3 + aspect-ratio groove/pocket classifier; through-bores exclude
-#           blind floor faces; de-dup. Schema stays alloy.sketchup.v6.3.
+# main.rb — ALLOY Export v0.6.5
+# v0.6.5 = v0.6.4 + cabinet-relative face polarity (inner/outer) for cuts &
+#           tooling; fixes mirrored side panels and shelf pocket face.
+#           Schema stays alloy.sketchup.v6.3.
 #
 # Safe: read-only, no model changes, no network.
 
@@ -9,7 +10,7 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.4"
+    VERSION = "0.6.5"
     SCHEMA  = "alloy.sketchup.v6.3"
     MM      = 25.4   # inches → mm
 
@@ -80,7 +81,7 @@ module Alloy
       case sym when :x then "width" when :y then "depth" when :z then "height" end
     end
 
-    def self.detect_cuts(e)
+    def self.detect_cuts(e, tr)
       # Only ComponentInstances have a well-defined local coordinate system.
       return [] unless e.is_a?(Sketchup::ComponentInstance)
 
@@ -106,6 +107,16 @@ module Alloy
 
       t_min = coord(bb.min, t_sym)
       t_max = t_min + th
+
+      # World-relative face direction: transform local t-axis to world and compare
+      # to the direction from panel centre toward the cabinet centre.
+      t_world_dir = case t_sym
+        when :x then tr.xaxis.normalize
+        when :y then tr.yaxis.normalize
+        when :z then tr.zaxis.normalize
+      end
+      pc_world = tr * bb.center
+      int_vec  = @cab_center ? (@cab_center - pc_world) : nil
 
       # The two face-plane axes (everything except T)
       face_syms = [:x, :y, :z] - [t_sym]
@@ -169,8 +180,13 @@ module Alloy
           runs_sym      = u_sym
         end
 
-        # Which big face is this closest to?
-        face_side = (t_val - t_min) <= (t_max - t_val) ? "front" : "back"
+        # Cabinet-relative face: open normal dotted against interior direction.
+        open_sign = (t_val - t_min) <= (t_max - t_val) ? -1.0 : 1.0
+        face_side = if int_vec && int_vec.length > tol
+          (open_sign * t_world_dir.dot(int_vec)) >= 0 ? "inner" : "outer"
+        else
+          (t_val - t_min) <= (t_max - t_val) ? "inner" : "outer"
+        end
 
         depth_mm  = mm(depth_in)
         th_mm     = mm(th)
@@ -407,7 +423,7 @@ module Alloy
 
     # Detect through-bores (inner loops of big faces) and blind pockets (interior
     # intermediate floor faces). Returns tooling[] (possibly empty). Never raises.
-    def self.detect_tooling(e)
+    def self.detect_tooling(e, tr)
       return [] unless e.is_a?(Sketchup::ComponentInstance)
 
       defn = e.definition
@@ -426,6 +442,15 @@ module Alloy
       end
       t_min = coord(bb.min, t_sym)
       t_max = t_min + th
+
+      # World-relative face direction (same principle as detect_cuts).
+      t_world_dir = case t_sym
+        when :x then tr.xaxis.normalize
+        when :y then tr.yaxis.normalize
+        when :z then tr.zaxis.normalize
+      end
+      pc_world = tr * bb.center
+      int_vec  = @cab_center ? (@cab_center - pc_world) : nil
 
       face_syms = [:x, :y, :z] - [t_sym]
       u_sym    = face_syms[0]
@@ -488,7 +513,8 @@ module Alloy
               diameter_mm: (2 * c[:r]).round(1),
               cu_mm:       c[:cu].round(1),
               cv_mm:       c[:cv].round(1),
-              face:        "both"
+              face:        "both",
+              _loop_pts:   pts_clean.length
             }
           else
             key = uv_pts.map { |p| [p[0].round, p[1].round] }.sort.first(3).inspect
@@ -525,7 +551,12 @@ module Alloy
         next if shorter < 0.001 || longer / shorter.to_f >= GROOVE_ASPECT  # linear cut, not pocket
 
         depth_in  = [t_val - t_min, t_max - t_val].min
-        face_side = (t_val - t_min) <= (t_max - t_val) ? "front" : "back"
+        open_sign = (t_val - t_min) <= (t_max - t_val) ? -1.0 : 1.0
+        face_side = if int_vec && int_vec.length > tol
+          (open_sign * t_world_dir.dot(int_vec)) >= 0 ? "inner" : "outer"
+        else
+          (t_val - t_min) <= (t_max - t_val) ? "inner" : "outer"
+        end
 
         uv_pts = f.outer_loop.vertices.map do |vert|
           p = vert.position
@@ -638,7 +669,7 @@ module Alloy
             node[:mesh_ref] = mk unless mk.nil?
           end
         else
-          result = detect_cuts(e)
+          result = detect_cuts(e, tr)
           if result == :complex
             node[:cuts]        = []
             node[:tooling]     = []
@@ -657,7 +688,7 @@ module Alloy
               }
             end
             node[:cuts]    = result
-            node[:tooling] = detect_tooling(e)
+            node[:tooling] = detect_tooling(e, tr)
           end
         end
         ol = face_outline(e)
@@ -732,6 +763,15 @@ module Alloy
       if roots.empty?
         UI.messagebox("Nothing to export.\nSelect one or more components/groups, or open a model with components, then try again.")
         return
+      end
+
+      # Cabinet centre in world space — used for cabinet-relative face labelling.
+      all_corners = roots.flat_map { |r| (0..7).map { |i| r.bounds.corner(i) rescue nil }.compact }
+      if all_corners.empty?
+        @cab_center = nil
+      else
+        xs = all_corners.map(&:x); ys = all_corners.map(&:y); zs = all_corners.map(&:z)
+        @cab_center = Geom::Point3d.new((xs.min+xs.max)/2.0, (ys.min+ys.max)/2.0, (zs.min+zs.max)/2.0)
       end
 
       identity = Geom::Transformation.new
