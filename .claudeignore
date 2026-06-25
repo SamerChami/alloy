@@ -1,0 +1,10 @@
+node_modules
+.next
+*.lock
+*.zip
+files*.zip
+package-lock.json
+.env
+.env.*
+dist
+build
