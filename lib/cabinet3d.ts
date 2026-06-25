@@ -332,10 +332,45 @@ function buildBoxesFromOrientedPanels(
   const oriented = panels.map(p => {
     const role = (p.part_role || "other") as PartRole;
     const axes = p.axes!;
-    // Local box extents (metres): su_width=local x, su_height=local y, su_depth=local z
-    const bw = m(p.su_width_mm);
-    const bh = m(p.su_height_mm);
-    const bd = m(p.su_depth_mm);
+    // Dimension panels from outline_mm (local-frame extents); fittings use world size_mm fallback.
+    // axis-name → local index: width→0 (=bw/col0), depth→1 (=bh/col1), height→2 (=bd/col2)
+    const _isFitting = (() => {
+      const n = (p.part_name || "").toLowerCase();
+      return n.includes("p2o") || n.includes("leg") || n.includes("atira") ||
+             n.includes("hafele") || n.includes("basket") || n.includes("l_channel") ||
+             n.includes("u_channel") || n.includes("channel") || n.includes("blum") ||
+             n.includes("hinge") || n.includes("slide");
+    })();
+    let bw = m(p.su_width_mm);
+    let bh = m(p.su_height_mm);
+    let bd = m(p.su_depth_mm);
+    if (!_isFitting && p.outline_mm) {
+      const ol = p.outline_mm;
+      const us = ol.loop.map(pt => pt[0]);
+      const vs = ol.loop.map(pt => pt[1]);
+      const u_extent = Math.max(...us) - Math.min(...us);
+      const v_extent = Math.max(...vs) - Math.min(...vs);
+      if (u_extent > 1 && v_extent > 1) {
+        const thicknessRole = (['width', 'depth', 'height'] as const).find(
+          r => r !== ol.u_axis && r !== ol.v_axis,
+        );
+        if (!thicknessRole) {
+          console.warn('[12FIX] unexpected axis names for', p.part_name, ol.u_axis, ol.v_axis, '— falling back to size_mm');
+        } else {
+          // Route by role: width→bw (local x/col0), depth→bh (local y/col1), height→bd (local z/col2)
+          const roleExtent: Record<string, number> = {
+            [ol.u_axis]: u_extent,
+            [ol.v_axis]: v_extent,
+            [thicknessRole]: ol.thickness_mm,
+          };
+          bw = m(roleExtent['width']);
+          bh = m(roleExtent['depth']);
+          bd = m(roleExtent['height']);
+        }
+      } else {
+        console.warn('[12FIX] degenerate outline for', p.part_name, '— falling back to size_mm');
+      }
+    }
     // Three-space orientation columns (C applied to each SU local axis)
     const col0 = Cx(axes.x);
     const col1 = Cx(axes.y);

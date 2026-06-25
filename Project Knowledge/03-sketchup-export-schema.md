@@ -1,135 +1,66 @@
 # ALLOY App — SketchUp Export JSON Schema (alloy.sketchup.v6)
 
 ## Overview
-The ALLOY SketchUp extension (`alloy_export.rbz`, currently **v0.6.2**) exports a
-SketchUp model to a structured JSON file consumed by the app's import pipeline.
+The ALLOY SketchUp extension (`alloy_export.rbz`, currently **v0.6.8**,
+schema string `alloy.sketchup.v6.3`) exports a SketchUp model to structured
+JSON consumed by the app's import pipeline.
 
-The schema has evolved: **v2** (flat items) → **v3** (nested tree) →
-**v4** (nested tree + machining `cuts`) → **v5** (adds per-node `axes`
-orientation). This document describes **v5**, the current format. Older shapes are
-summarized at the bottom for the importers that still read them.
+Schema evolution: **v2** (flat) → **v3** (nested tree) → **v4** (+ `cuts`) →
+**v5** (+ `axes` orientation) → **v6** (+ `outline_mm`, `profile_mm`,
+`mesh_ref`/`meshes`, `tooling`, and `open_normal` in WORLD space). This
+document describes **v6**, the current format. Earlier shapes are summarized
+at the bottom for importers that still read them.
 
-**Why v5 exists:** v4 gave each part an axis-aligned bounding box (`size_mm`) and a
-world centre (`pos_mm`) but NO orientation. That works for cabinets modelled
-axis-aligned, but breaks for any rotated part — most importantly the **L-shaped
-base corner cabinet** (`BC2.K3.120*120`), whose two perpendicular legs cannot both
-be axis-aligned. v5 adds `axes` (the part's local orientation), so the viewer can
-render each part as an ORIENTED box and rotated cabinets render correctly.
-
----
-
+> **Critical:** v6 placement is **orientation-aware**. Each part is an
+> oriented box, not an axis-aligned one. See "3D placement" below — the old
+> "use raw size_mm + pos_mm" recipe from v4 is NO LONGER correct for rotated
+> or mirrored parts and must not be used.
 
 ---
 
-## v5.1 → v6 additions (current)
-
-Everything below the next divider describes the **v5** base (axes, placement, cuts),
-which is still current. The fields added since v5 are summarized here.
-
-### `outline_mm` (v5.1+) — panel silhouette, on every leaf
-The true 2D outer loop of the leaf's largest thickness-parallel face, in panel-LOCAL
-mm, origin at the panel min corner. Lets the viewer extrude the real silhouette
-(e.g. an L-shaped corner shelf) instead of a bounding box. Also the CNC/cut-list cut
-profile.
-```json
-"outline_mm": {
-  "u_axis": "width", "v_axis": "depth", "thickness_mm": 18.0,
-  "loop": [[u0,v0],[u1,v1], ...]   // ordered; may include tessellated curves (fillets)
-}
-```
-- Loop point count varies: a plain rectangle = 4 pts; an L = 6 logical corners (more
-  if an inner corner is filleted — the arc is tessellated).
-- Viewer builds a `THREE.Shape` + `ExtrudeGeometry`; box fallback when absent.
-
-### `profile_mm` (v5.3+) — channel cross-section, on channel fittings only
-For extruded-profile fittings (`l_channel`/`u_channel`/`channel`): the END-face
-cross-section (the profile), extruded along the run axis. This renders the true Gola
-L/U section with the foot oriented as modelled (the old foot-direction guess is gone).
-```json
-"profile_mm": {
-  "p_axis": "depth", "q_axis": "height", "run_axis": "width",
-  "run_mm": 667.0,
-  "loop": [[p0,q0], ...]   // cross-section profile, local mm
-}
-```
-- The cross-section is the SMALLEST face (perpendicular to the run = LONGEST axis) —
-  distinct from `outline_mm` (largest face).
-- Panels do NOT get `profile_mm`; channels keep it instead of a mesh.
-
-### `meshes` + `mesh_ref` (v6) — true geometry for detailed fittings
-Fittings that are NOT profile-representable (legs, hardware) export their full
-triangulated SketchUp geometry. Meshes are **deduped by canonical geometry hash**
-(invariant to vertex/triangle order), so identical parts share one entry regardless of
-how the model named or copied them.
-
-Top-level dictionary (each unique geometry once):
-```json
-"meshes": {
-  "mesh_<hash>": {
-    "vertices":  [[x,y,z], ...],   // local mm
-    "triangles": [[a,b,c], ...]    // 0-based indices into vertices
-  }
-}
-```
-Each meshed leaf references its geometry:
-```json
-"mesh_ref": "mesh_<hash>"
-```
-- Gate: `fitting && !channel`. Panels keep `outline_mm`; channels keep `profile_mm`;
-  legs/hardware get `mesh_ref`. (Mirrored instances are reflections → may form a 2nd
-  hash entry; that is correct.)
-- Viewer builds a `BufferGeometry` from the referenced mesh, maps SU→three `(x,z,-y)`,
-  applies `axes` orientation + `pos_mm`. Cylinder fallback (Stage 9d) when no mesh.
-- Meshes are for the 3D PREVIEW only — cut-lists/CNC still use `outline_mm`/`cuts`.
-
-### Supported schema strings (app parser)
-`alloy.sketchup.v3`, `v4`, `v5`, `v5.1`, `v5.2`, `v5.3`, `v6`.
-
-
-## Top-Level Structure (v5)
+## Top-Level Structure (v6)
 
 ```json
 {
-  "schema": "alloy.sketchup.v5",
-  "version": "0.5.0",
+  "schema": "alloy.sketchup.v6.3",
+  "version": "0.6.8",
   "model": "test.skp",
   "units": "mm",
   "root_count": 1,
-  "total_parts": 23,
+  "total_parts": 20,
   "summary": { "Cabinet": 1 },
-  "roots": [ ...RootNode ]
+  "roots": [ ...RootNode ],
+  "meshes": { ...meshId: MeshData }
 }
 ```
 
-- `total_parts` — total count of leaf descendants across all roots.
-- `summary` — count of roots by `item_type` (Cabinet, Appliance, Worktop, Trim,
-  Other, RoomBox).
-- `roots[]` — each root is one top-level component/group in the model.
+- `meshes` — a top-level dictionary of deduplicated mesh geometry, keyed by a
+  hash/id. Leaf fittings reference entries here via `mesh_ref` (Stage 10).
+- Other top-level fields unchanged from v4.
 
 ---
 
 ## Node Structure (recursive tree)
 
-Every node — root, intermediate sub-assembly, or leaf part — shares a common
-shape. Nodes nest via `children[]`. **A model is a tree, not a flat list.**
+Nodes nest via `children[]`; enumerate parts by recursively collecting every
+`is_leaf: true` descendant.
 
 ```json
 {
-  "name": "Left_Side#231",
+  "name": "Left_Side#2",
   "type": "component",
   "size_mm": { "x": 18.0, "y": 560.0, "z": 770.0 },
   "sorted_mm": [18.0, 560.0, 770.0],
   "pos_mm": { "x": 9.0, "y": 440.5, "z": 495.0 },
-  "axes": {
-    "x": [1.0, 0.0, 0.0],
-    "y": [0.0, 1.0, 0.0],
-    "z": [0.0, 0.0, 1.0]
-  },
+  "axes": { "x": [1,0,0], "y": [0,1,0], "z": [0,0,1] },
   "is_leaf": true,
   "item_type": "Part",
   "role": "part",
   "cuts": [ ...Cut ],
-
+  "tooling": [ ...Tool ],
+  "outline_mm": { ...Outline },
+  "profile_mm": { ...Profile },   // channels only
+  "mesh_ref": "abc123",            // mesh-based fittings only (legs)
   "children": [ ...Node ]
 }
 ```
@@ -137,125 +68,142 @@ shape. Nodes nest via `children[]`. **A model is a tree, not a flat list.**
 ### Field reference
 | Field | Where | Meaning |
 |-------|-------|---------|
-| `name` | all | Component name + instance suffix `#NN` (e.g. `Left_Side#231`). |
-| `type` | all | SketchUp entity kind (`component` / `group`). |
-| `size_mm.{x,y,z}` | all | Bounding-box extents along the part's **LOCAL** x/y/z axes (from the component definition's bounds). Rotation-invariant. NOT sorted. |
-| `sorted_mm[]` | all | The three extents sorted ascending. Use ONLY for cut-list H/W/T. |
-| `pos_mm.{x,y,z}` | all | Bounding-box **center** in SketchUp world coords. |
-| `axes` | all | **(v5)** The part's three LOCAL axis unit-vectors expressed in SketchUp world space. See below. |
-| `is_leaf` | all | `true` = a real part; `false` = a sub-assembly with `children`. |
-| `item_type` | all | `Cabinet` on roots; `Part` on leaves; `Other` on intermediate sub-assemblies. |
-| `role` | leaves | `"part"` (present on leaf parts). |
-| `cuts[]` | leaves | Detected machining cuts (v4+). Empty array if none. |
-| `children[]` | non-leaves | Child nodes (recursive). |
-| `panel_count` | roots | Number of panel leaves under this root. |
-| `fitting_count` | roots | Number of fitting leaves under this root. |
-
-### `axes` (v5) — orientation
-`axes.x`, `axes.y`, `axes.z` are the part's LOCAL x/y/z axes, each a unit vector in
-SketchUp world space, taken from the part's cumulative transform. Together with
-`size_mm` (measured along those same local axes) they describe an **oriented box**.
-
-- **Axis-aligned part** (normal cabinet) → identity:
-  `{"x":[1,0,0],"y":[0,1,0],"z":[0,0,1]}`.
-- **Part rotated 90° about vertical** (corner-cabinet second leg), local X pointing
-  to world +Y: `{"x":[0,1,0],"y":[-1,0,0],"z":[0,0,1]}`.
-- Vectors are normalized (uniform scale stripped). Mirrored parts keep their sign,
-  so the 3×3 basis `[axes.x | axes.y | axes.z]` may have determinant **−1** — a
-  reflection. The viewer handles this when building the orientation matrix.
+| `name` | all | Component name + instance suffix `#NN`. Suffix changes between exports. |
+| `type` | all | SketchUp entity kind. |
+| `size_mm.{x,y,z}` | all | AABB extents along SketchUp **world X/Y/Z**. **World-axis order — NOT the part's local axes.** Do not use directly for oriented panel sizing. |
+| `sorted_mm[]` | all | Extents sorted ascending. Cut-list H/W/T only. |
+| `pos_mm.{x,y,z}` | all | AABB **center**, SketchUp world coords. |
+| `axes.{x,y,z}` | all | The part's three LOCAL axis unit-vectors expressed in SketchUp world space (v5+). Identity for unrotated parts; non-identity for rotated; **det = −1 for reflected/mirrored parts**. |
+| `is_leaf` | all | `true` = real part; `false` = sub-assembly. |
+| `item_type` | all | `Cabinet` / `Part` / `Other`. |
+| `role` | leaves | `"part"`. |
+| `cuts[]` | leaves | Grooves/rabbets/dados (aspect ratio ≥ 4:1). Empty if none. |
+| `tooling[]` | leaves | Compact pockets & bores (v6). Through-bores & blind pockets. |
+| `outline_mm` | panel leaves | The panel's 2D face loop in its OWN frame + thickness. Source of truth for oriented box sizing. |
+| `profile_mm` | channel leaves | Extruded cross-section profile (L/U channels). |
+| `mesh_ref` | mesh fittings | Key into top-level `meshes` (legs, complex fittings). |
+| `children[]` | non-leaves | Child nodes. |
 
 ---
 
-## 3D placement (v5 — oriented box)
-For each part build a `BoxGeometry` at its LOCAL `size_mm`, orient it by `axes`,
-and place it at `pos_mm`. Apply ONE global SketchUp→three (Z-up → Y-up) map to the
-whole assembly:
-- `three.x =  su.x`
-- `three.y =  su.z`
-- `three.z = -su.y`
-
-As a fixed change-of-basis `C = [[1,0,0],[0,0,1],[0,-1,0]]` (determinant +1). The
-part's three-space orientation is `C · [axes.x | axes.y | axes.z]`; its three-space
-centre is `C · pos_mm`. Recenter on the assembly's min corner so it sits at origin.
-
-> The app's SketchUp 3D path consumes `axes` when present (oriented-box render);
-> imports without `axes` (v2/v3/v4) fall back to the legacy axis-aligned logic.
-
-### Cut-list / BOM dimensions (unchanged)
-For the cut-list / BOM table use `sorted_mm`: `thickness = sorted_mm[0]`,
-`width = sorted_mm[1]`, `height = sorted_mm[2]`. (Orientation-independent; correct
-even for rotated parts, since `size_mm`/`sorted_mm` are local.)
-
----
-
-## Cuts (v4+) — machining detection
-
-Each leaf **panel** carries a `cuts[]` array (fittings always get `cuts: []`).
-Coordinates are **absolute on the panel face**, panel-local origin at the panel's
-min corner. Cut detection runs only on panels and is noise-filtered
-(width ≥ 3mm, length ≥ 5mm, depth ≥ 1mm).
+## `outline_mm` — panel face in local frame (v6, KEY for placement)
 
 ```json
-{
-  "type": "rabbet",          // dado | groove | rabbet | through
-  "depth_mm": 8.4,
-  "width_mm": 9.0,           // across the channel
-  "length_mm": 1164.0,       // along the channel
-  "runs_along": "width",     // width | height | depth
-  "face": "front",           // front | back | both (which big face: t≈0 vs t≈th)
-  "u_min_mm": 0.0, "u_max_mm": 1164.0,   // footprint axis 1
-  "v_min_mm": 518.0, "v_max_mm": 527.0   // footprint axis 2
+"outline_mm": {
+  "u_axis": "width",        // width | height | depth
+  "v_axis": "height",
+  "thickness_mm": 18.0,
+  "loop": [[0,0],[832,0],[832,752],[0,752]]   // [u,v] points, mm
 }
 ```
 
-A complex/curved panel that would emit too many slivers gets `cuts: []` plus a
-`cut_warning` string instead.
+- `u_axis` / `v_axis` name which dimensional ROLE the in-plane axes carry; the
+  remaining role is the thickness (out-of-plane) axis.
+- Role → local axis mapping (consistent across all panels, matches `size_mm`
+  ordering for identity-axes parts): **width → local x, depth → local y,
+  height → local z.**
+- The viewer builds the oriented box from outline extents routed by role, NOT
+  from `size_mm`. See placement below.
 
-**Viewer cut rendering (Stage 8b–8e):** cuts render as inset recess boxes in the
-panel's LOCAL frame, on the panel face pointing toward the cabinet interior, at the
-correct depth position. Under the v5 oriented-box path, the cut meshes are children
-of the panel mesh, so they inherit the panel's orientation automatically.
+---
+
+## Cuts & Tooling
+
+### `cuts[]` — grooves/rabbets (long, thin features)
+```json
+{
+  "type": "groove",         // groove | rabbet | dado | through
+  "depth_mm": 9.0,
+  "width_mm": 8.0,
+  "length_mm": 786.0,
+  "runs_along": "width",
+  "face": "inner",          // inner | outer (relative to open_normal)
+  "open_normal": [0,1,0],   // the floor face's own normal, in WORLD space (v0.6.8)
+  "u_min_mm": 30.5, "u_max_mm": 816.5,
+  "v_min_mm": 45.0,  "v_max_mm": 53.0
+}
+```
+- **`open_normal` is in WORLD space** (Stage 11e). For a rotated/flipped part
+  it reflects the part's placement (e.g. `[1,0,0]` after a 90° Z-rotation,
+  `[-1,0,0]` after an X-flip).
+- Groove face placement in the viewer is geometry-driven (`szSign`), and cut
+  meshes are children of the panel mesh — so they inherit the panel's
+  reflection-correct matrix automatically.
+
+### `tooling[]` — compact pockets & bores (v6)
+Through-bores (rendered as open holes via `THREE.Shape.holes`) and blind
+pockets (recessed cylinder discs). Aspect-ratio classifier sends long-thin
+features to `cuts[]` and compact ones to `tooling[]`.
 
 ---
 
 ## Leaf classification: panel vs fitting
 A leaf is a **fitting** if its name matches (case-insensitive):
 `p2o, leg_, atira, hafele, basket, l_channel, u_channel, channel, blum, hinge,
-slide, cutlery`. Otherwise it is a **panel**. (Same rule app-side and in the
-extension's cut-detection gate.)
+slide`. Otherwise a **panel**.
+
+Render-path consequence (three paths, all reflection-aware):
+- **Panel** → oriented box from `outline_mm`, applied via Matrix4.
+- **Channel fitting** (`profile_mm`) → extruded profile, applied via Matrix4.
+- **Mesh fitting** (`mesh_ref`, e.g. legs) → referenced mesh, applied via Matrix4.
+
+Fittings keep `size_mm`-based sizing where outlines are degenerate (e.g. a leg's
+outline is a tiny 5×2 loop), but ALL three paths apply the full `axes` basis as
+a reflection-preserving Matrix4.
+
+---
+
+## 3D placement (v6) — orientation & reflection aware
+
+**Do NOT use the old v4 recipe** (raw `size_mm` + `pos_mm`, axis-aligned). It
+only works for unrotated parts and scatters rotated/mirrored cabinets.
+
+Current pipeline:
+1. **Box dimensions** (panels): from `outline_mm` — u-extent, v-extent,
+   thickness — routed to local axes by role (width→x, depth→y, height→z).
+   Fittings size from their mesh/profile (or `size_mm` fallback).
+2. **Orientation:** build the 3×3 from the part's `axes`, each column passed
+   through the SU→three basis swap `Cx(v) = [v.x, v.z, −v.y]`. The result is
+   `C·Rworld`; reflected parts have **det = −1**.
+3. **Apply as a Matrix4, NOT a quaternion.** A quaternion cannot represent a
+   reflection and silently drops the −1 determinant, rotating mirrored panels
+   90° off (the historical "fin" bug). Use
+   `matrixAutoUpdate = false; mesh.matrix.copy(M)` with translation baked in.
+4. **Cuts/tooling** are children of the panel mesh and inherit its matrix —
+   no per-cut sign logic.
+
+SU→three basis swap (unchanged, applies everywhere):
+`three.x = su.x`, `three.y = su.z`, `three.z = −su.y`.
+
+> A Z-flip yields a physically upside-down cabinet (legs on top). The viewer
+> renders this faithfully; it is a modeling concern, not a viewer bug.
 
 ---
 
 ## Cabinet naming (real-world)
-Names are compound descriptors, e.g. `BDR.K3.120 / Wood DR / P2O / LCH`. The
-leading token (`BDR.K3.120`) is the cabinet code used to match against
-`products.code`. The matcher parses the first slash-delimited segment, trimmed.
+Compound descriptors, e.g. `BDR.K3.120 / Wood DR / P2O / LCH`. The leading
+slash-delimited segment (`BDR.K3.120`), trimmed, is the cabinet code matched
+against `products.code`.
 
 ---
 
 ## Importers and which schema they read
 | Importer (app route) | Schema | Status |
 |----------------------|--------|--------|
-| `/products/import` (.3ds) | binary .3ds | assembled geometry, real positions |
-| `/products/import` (.dxf) | Polyboard DXF | legacy; flat-layout, synthesized 3D |
-| `/products/import-sketchup` | `alloy.sketchup.v2` | bulk catalog (flat `items[]`) |
-| `/products/import-sketchup-single` | `alloy.sketchup.v3`/`v4`/`v5` | one cabinet → one product |
-| `/products/import-sketchup-project` | `alloy.sketchup.v3`/`v4`/`v5` | many cabinets → bulk |
+| `/products/import` (.3ds / .dxf) | binary / DXF | legacy geometry importers |
+| `/products/import-sketchup` | `v2` | bulk catalog (flat `items[]`) |
+| `/products/import-sketchup-single` | `v3`–`v6` tree | one cabinet → one product |
+| `/products/import-sketchup-project` | `v3`–`v6` tree | many cabinets → bulk |
 
-> v5 is structurally v4 + `axes` on every node. The recursive parser carries `axes`
-> through (optional); the 3D path uses it when present and falls back to the legacy
-> axis-aligned logic when absent (v3/v4).
+> v6 is structurally the v3 tree + `cuts` + `axes` + `outline_mm`/`profile_mm`/
+> `mesh_ref` + `tooling`. `lib/sketchup/parseV3.ts` carries the additive fields;
+> the viewer (`lib/cabinet3d.ts`, `components/Cabinet3D.tsx`) consumes `axes`/
+> `outline_mm` for oriented rendering.
 
 ---
 
-## Legacy shapes (for the older importers)
-
-**v2** — flat `items[]`, each with `overall_mm.{w,h,d}`, `panels[]`, `fittings[]`.
-No nesting beyond panels/fittings. Read by `/products/import-sketchup`.
-
-**v3** — nested `roots[]` tree with `size_mm`/`sorted_mm`/`pos_mm`, recursive
-`children`, `is_leaf`, `item_type`. No `cuts`, no `axes`.
-
-**v4** — v3 + `cuts[]` on leaf panels + `total_parts`. No `axes`. Parts assumed
-axis-aligned; `size_mm` treated as world-axis extents by the viewer (correct only
-for un-rotated cabinets).
+## Legacy shapes (older importers)
+**v2** — flat `items[]` with `overall_mm`, `panels[]`, `fittings[]`.
+**v3** — nested `roots[]` tree, no `cuts`/`axes`.
+**v4** — v3 + `cuts[]` + `total_parts`.
+**v5** — v4 + `axes` on every node.

@@ -269,14 +269,17 @@ export function Cabinet3D({
             const o = box.orient;
             const m4 = new THREE.Matrix4();
             m4.set(
-              o[0], o[3], o[6], 0,
-              o[1], o[4], o[7], 0,
-              o[2], o[5], o[8], 0,
+              o[0], o[3], o[6], box.x,
+              o[1], o[4], o[7], box.y,
+              o[2], o[5], o[8], box.z,
               0, 0, 0, 1,
             );
             obj = new THREE.Group();
             addPartToGroup(obj, g, fittingColor(name)!, isWireframe);
-            obj.quaternion.setFromRotationMatrix(m4);
+            // Apply full basis as Matrix4 so reflections (det -1) survive (quaternion drops them)
+            obj.matrixAutoUpdate = false;
+            obj.matrix.copy(m4);
+            obj.matrixWorldNeedsUpdate = true;
           } else if (isChannel && box.profile && box.orient) {
             // Priority 2: channel profile extrude (Stage 9f)
             const pf   = box.profile;
@@ -298,29 +301,37 @@ export function Cabinet3D({
             const rI = aI[pf.run_axis];
             const rm = new THREE.Matrix4();
             rm.set(
-              oC[pI][0], oC[qI][0], oC[rI][0], 0,
-              oC[pI][1], oC[qI][1], oC[rI][1], 0,
-              oC[pI][2], oC[qI][2], oC[rI][2], 0,
+              oC[pI][0], oC[qI][0], oC[rI][0], box.x,
+              oC[pI][1], oC[qI][1], oC[rI][1], box.y,
+              oC[pI][2], oC[qI][2], oC[rI][2], box.z,
               0, 0, 0, 1,
             );
             obj = new THREE.Group();
             addPartToGroup(obj, extGeo, fittingColor(name)!, isWireframe);
-            obj.quaternion.setFromRotationMatrix(rm);
+            // Apply full basis as Matrix4 so reflections (det -1) survive (quaternion drops them)
+            obj.matrixAutoUpdate = false;
+            obj.matrix.copy(rm);
+            obj.matrixWorldNeedsUpdate = true;
           } else {
             // Default fitting (legs, P2O, boxes, channels without profile)
             obj = buildFittingObject(name, box.w, box.h, box.d, isWireframe);
             if (box.orient && !box.uprightCylinder) {
               const m = new THREE.Matrix4();
               m.set(
-                box.orient[0], box.orient[3], box.orient[6], 0,
-                box.orient[1], box.orient[4], box.orient[7], 0,
-                box.orient[2], box.orient[5], box.orient[8], 0,
+                box.orient[0], box.orient[3], box.orient[6], box.x,
+                box.orient[1], box.orient[4], box.orient[7], box.y,
+                box.orient[2], box.orient[5], box.orient[8], box.z,
                 0, 0, 0, 1,
               );
-              obj.quaternion.setFromRotationMatrix(m);
+              // Apply full basis as Matrix4 so reflections (det -1) survive (quaternion drops them)
+              obj.matrixAutoUpdate = false;
+              obj.matrix.copy(m);
+              obj.matrixWorldNeedsUpdate = true;
             }
           }
-          obj.position.set(box.x, box.y, box.z);
+          // Orient branches bake translation into the matrix (matrixAutoUpdate=false);
+          // only the upright/no-orient case still needs an explicit position.
+          if (obj.matrixAutoUpdate) obj.position.set(box.x, box.y, box.z);
           group.add(obj);
           continue;
         }
@@ -363,7 +374,12 @@ export function Cabinet3D({
           const tI    = [0, 1, 2].find(i => i !== uI && i !== vI)!;
           // +1 if shape +Z (thickness direction) points toward cabinet interior, -1 if outward
           const szSign = (cW/1000/2 - box.x)*oC[tI][0] + (cH/1000/2 - box.y)*oC[tI][1] + (cD/1000/2 - box.z)*oC[tI][2] > 0 ? 1 : -1;
-          const rm    = new THREE.Matrix4();
+          // SU→Three basis swap: three.x=su.x (+1), three.y=su.z (+1), three.z=−su.y (−1).
+          // tI=0 (width/X) and tI=2 (height/Z) need no correction; tI=1 (depth/Y) must be negated.
+          const basisSign = (tI === 1) ? -1 : 1;
+          // Use oC[tI] so det may be −1 for reflected panels; applied via mesh.matrix.copy()
+          // (not quaternion) so the reflection is preserved and the panel lies in the correct plane.
+          const rm = new THREE.Matrix4();
           rm.set(
             oC[uI][0], oC[vI][0], oC[tI][0], 0,
             oC[uI][1], oC[vI][1], oC[tI][1], 0,
@@ -373,9 +389,10 @@ export function Cabinet3D({
           if (isWireframe) {
             const edgesGeo = new THREE.EdgesGeometry(extGeo);
             const lines    = new THREE.LineSegments(edgesGeo, new THREE.LineBasicMaterial({ color: ROLE_COLOR[box.role] ?? 0x888880 }));
-            lines.quaternion.setFromRotationMatrix(rm);
-            lines.updateMatrix();
-            lines.position.set(box.x, box.y, box.z);
+            lines.matrixAutoUpdate = false;
+            rm.setPosition(box.x, box.y, box.z);
+            lines.matrix.copy(rm);
+            lines.matrixWorldNeedsUpdate = true;
             group.add(lines);
             extGeo.dispose();
             // Wireframe blind pocket rings
@@ -386,7 +403,7 @@ export function Cabinet3D({
                 const pd = ti.depth_mm / 1000;
                 const discGeo = new THREE.CylinderGeometry(pr, pr, pd, 48);
                 discGeo.rotateX(Math.PI / 2);
-                const ptSign = ti.open_normal != null ? ti.open_normal[tI] : (ti.face === "inner" ? szSign : -szSign);
+                const ptSign = (ti.face === "inner" ? szSign : -szSign);
                 const pFaceZ = ptSign * (thickness / 2 - pd / 2);
                 const eg = new THREE.EdgesGeometry(discGeo);
                 const dl = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: ROLE_COLOR[box.role] ?? 0x888880 }));
@@ -403,7 +420,7 @@ export function Cabinet3D({
                 const cuSz   = (cut.u_max_mm - cut.u_min_mm) / 1000;
                 const cvSz   = (cut.v_max_mm - cut.v_min_mm) / 1000;
                 const cDepth = cut.depth_mm / 1000;
-                const onSignW = cut.open_normal != null ? cut.open_normal[tI] : szSign;
+                const onSignW = szSign;
                 const addCutFaceW = (side: "inner" | "outer") => {
                   const cZ   = side === "inner" ? onSignW * (thickness / 2 - cDepth / 2) : -onSignW * (thickness / 2 - cDepth / 2);
                   const cGeo = new THREE.BoxGeometry(cuSz, cvSz, cDepth);
@@ -421,9 +438,10 @@ export function Cabinet3D({
           } else {
             const mat  = new THREE.MeshStandardMaterial({ color: ROLE_COLOR[box.role] ?? 0xD9D5CE, roughness: 0.8, metalness: 0.02 });
             const mesh = new THREE.Mesh(extGeo, mat);
-            mesh.quaternion.setFromRotationMatrix(rm);
-            mesh.updateMatrix();
-            mesh.position.set(box.x, box.y, box.z);
+            mesh.matrixAutoUpdate = false;
+            rm.setPosition(box.x, box.y, box.z);
+            mesh.matrix.copy(rm);
+            mesh.matrixWorldNeedsUpdate = true;
             mesh.castShadow    = true;
             mesh.receiveShadow = true;
             group.add(mesh);
@@ -438,7 +456,7 @@ export function Cabinet3D({
                 discGeo.rotateX(Math.PI / 2);
                 const discMat = (mat as THREE.MeshStandardMaterial).clone();
                 const disc = new THREE.Mesh(discGeo, discMat);
-                const ptSign = ti.open_normal != null ? ti.open_normal[tI] : (ti.face === "inner" ? szSign : -szSign);
+                const ptSign = (ti.face === "inner" ? szSign : -szSign);
                 const pFaceZ = ptSign * (thickness / 2 - pd / 2);
                 disc.position.set(ti.cu_mm / 1000 - uMax / 2, ti.cv_mm / 1000 - vMax / 2, pFaceZ);
                 disc.castShadow = true;
@@ -455,7 +473,7 @@ export function Cabinet3D({
                 const cuSz   = (cut.u_max_mm - cut.u_min_mm) / 1000;
                 const cvSz   = (cut.v_max_mm - cut.v_min_mm) / 1000;
                 const cDepth = cut.depth_mm / 1000;
-                const onSignS = cut.open_normal != null ? cut.open_normal[tI] : szSign;
+                const onSignS = szSign;
                 const addCutFaceS = (side: "inner" | "outer") => {
                   const cZ   = side === "inner" ? onSignS * (thickness / 2 - cDepth / 2) : -onSignS * (thickness / 2 - cDepth / 2);
                   const cGeo = new THREE.BoxGeometry(cuSz, cvSz, cDepth);
@@ -483,21 +501,25 @@ export function Cabinet3D({
           if (box.orient) {
             const om = new THREE.Matrix4();
             om.set(
-              box.orient[0], box.orient[3], box.orient[6], 0,
-              box.orient[1], box.orient[4], box.orient[7], 0,
-              box.orient[2], box.orient[5], box.orient[8], 0,
+              box.orient[0], box.orient[3], box.orient[6], box.x,
+              box.orient[1], box.orient[4], box.orient[7], box.y,
+              box.orient[2], box.orient[5], box.orient[8], box.z,
               0, 0, 0, 1,
             );
-            lines.quaternion.setFromRotationMatrix(om);
-            lines.updateMatrix();
+            lines.matrixAutoUpdate = false;
+            lines.matrix.copy(om);
+            lines.matrixWorldNeedsUpdate = true;
+          } else {
+            lines.position.set(box.x, box.y, box.z);
           }
-          lines.position.set(box.x, box.y, box.z);
           group.add(lines);
           geo.dispose();
           if (showCuts && box.cuts && box.cuts.length > 0) {
+            console.log("[11D-CHK]", box.part_name, "→ addCutMeshes(wf) bw=", box.w, "bh=", box.h, "bd=", box.d);
             addCutMeshes(lines, box.cuts, box.w, box.h, box.d, true,
               { x: box.x, y: box.y, z: box.z },
-              { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 });
+              { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 },
+              box.orient);
           }
         } else {
           const mat = new THREE.MeshStandardMaterial({
@@ -511,24 +533,28 @@ export function Cabinet3D({
           if (box.orient) {
             const om = new THREE.Matrix4();
             om.set(
-              box.orient[0], box.orient[3], box.orient[6], 0,
-              box.orient[1], box.orient[4], box.orient[7], 0,
-              box.orient[2], box.orient[5], box.orient[8], 0,
+              box.orient[0], box.orient[3], box.orient[6], box.x,
+              box.orient[1], box.orient[4], box.orient[7], box.y,
+              box.orient[2], box.orient[5], box.orient[8], box.z,
               0, 0, 0, 1,
             );
-            mesh.quaternion.setFromRotationMatrix(om);
-            mesh.updateMatrix();
+            mesh.matrixAutoUpdate = false;
+            mesh.matrix.copy(om);
+            mesh.matrixWorldNeedsUpdate = true;
+          } else {
+            mesh.position.set(box.x, box.y, box.z);
           }
-          mesh.position.set(box.x, box.y, box.z);
           mesh.castShadow    = true;
           mesh.receiveShadow = true;
           group.add(mesh);
           const edgesGeo = new THREE.EdgesGeometry(geo);
           mesh.add(new THREE.LineSegments(edgesGeo, new THREE.LineBasicMaterial({ color: 0x5a5a52 })));
           if (showCuts && box.cuts && box.cuts.length > 0) {
+            console.log("[11D-CHK]", box.part_name, "→ addCutMeshes(solid) bw=", box.w, "bh=", box.h, "bd=", box.d);
             addCutMeshes(mesh, box.cuts, box.w, box.h, box.d, false,
               { x: box.x, y: box.y, z: box.z },
-              { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 });
+              { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 },
+              box.orient);
           }
         }
       }
@@ -730,6 +756,7 @@ function addCutMeshes(
   wireframe: boolean,
   panelCenter: { x: number; y: number; z: number },
   cabinetCenter: { x: number; y: number; z: number },
+  orient?: number[],
 ) {
   type Axis3 = "x" | "y" | "z";
   let tAxis: Axis3, uAxis: Axis3, vAxis: Axis3;
@@ -762,7 +789,7 @@ function addCutMeshes(
       const cabT   = tAxis === "x" ? cabinetCenter.x : tAxis === "y" ? cabinetCenter.y : cabinetCenter.z;
       const interiorSign = (cabT - panelT) >= 0 ? 1 : -1;
       const tIdx = tAxis === "x" ? 0 : tAxis === "y" ? 1 : 2;
-      const effectiveSign = cut.open_normal != null ? cut.open_normal[tIdx] : interiorSign;
+      const effectiveSign = interiorSign;
       pos[tAxis] = side === "inner"
         ? effectiveSign * (thickness / 2 - depth / 2)
         : -effectiveSign * (thickness / 2 - depth / 2);

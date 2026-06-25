@@ -1,4 +1,6 @@
-# main.rb — ALLOY Export v0.6.6
+# main.rb — ALLOY Export v0.6.8
+# v0.6.8 = v0.6.7-FIX: open_normal now emitted in world space (rotation applied);
+#           local == world for unrotated cabinets so unrotated export is unchanged.
 # v0.6.6 = v0.6.5-FIX: open face computed in world space (mirror-stable,
 #           correct polarity); viewer reads inner/outer. Schema alloy.sketchup.v6.3.
 #
@@ -9,7 +11,7 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.7"
+    VERSION = "0.6.8"
     SCHEMA  = "alloy.sketchup.v6.3"
     MM      = 25.4   # inches → mm
 
@@ -175,8 +177,9 @@ module Alloy
 
         # Open-face direction: floor face's own world normal vs cabinet-interior.
         floor_n_local = faces.first.normal.normalize
+        floor_n_world = (tr * floor_n_local).normalize
         face_side = if int_w
-          n_w    = (tr * floor_n_local).normalize
+          n_w    = floor_n_world
           dot    = n_w.dot(int_w)
           dot > 0 ? "inner" : "outer"
         else
@@ -205,7 +208,7 @@ module Alloy
           length_mm:   mm(cut_length_in),
           runs_along:  axis_label(runs_sym),
           face:        face_side,
-          open_normal: [floor_n_local.x.round(6), floor_n_local.y.round(6), floor_n_local.z.round(6)],
+          open_normal: [floor_n_world.x, floor_n_world.y, floor_n_world.z].map { |c| (c.abs < 1e-9 ? 0.0 : c).round(6) },
           u_min_mm:    mm(cu_min - u_origin),
           u_max_mm:    mm(cu_max - u_origin),
           v_min_mm:    mm(cv_min - v_origin),
@@ -543,8 +546,9 @@ module Alloy
 
         depth_in      = [t_val - t_min, t_max - t_val].min
         floor_n_local = f.normal.normalize
+        floor_n_world = (tr * floor_n_local).normalize
         face_side = if int_w
-          n_w = (tr * floor_n_local).normalize
+          n_w = floor_n_world
           n_w.dot(int_w) > 0 ? "inner" : "outer"
         else
           (t_val - t_min) <= (t_max - t_val) ? "inner" : "outer"
@@ -557,7 +561,7 @@ module Alloy
         next if uv_pts.length < 3
 
         c = fit_circle(uv_pts)
-        on = [floor_n_local.x.round(6), floor_n_local.y.round(6), floor_n_local.z.round(6)]
+        on = [floor_n_world.x, floor_n_world.y, floor_n_world.z].map { |c| (c.abs < 1e-9 ? 0.0 : c).round(6) }
         if c && c[:residual] <= ROUND_TOL
           tooling << {
             shape:       "circle",
