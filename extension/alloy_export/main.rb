@@ -1,8 +1,9 @@
-# main.rb — ALLOY Export v0.6.8
-# v0.6.8 = v0.6.7-FIX: open_normal now emitted in world space (rotation applied);
-#           local == world for unrotated cabinets so unrotated export is unchanged.
-# v0.6.6 = v0.6.5-FIX: open face computed in world space (mirror-stable,
-#           correct polarity); viewer reads inner/outer. Schema alloy.sketchup.v6.3.
+# main.rb — ALLOY Export v0.6.9
+# v0.6.9 = scale-aware export: measure instance (not definition) extents so
+#           non-uniformly scaled components report their true placed size.
+#           Schema alloy.sketchup.v6.4 (corrected magnitudes, same field layout).
+# v0.6.8 = v0.6.7-FIX: open_normal now emitted in world space (rotation applied).
+# v0.6.6 = v0.6.5-FIX: open face computed in world space (mirror-stable).
 #
 # Safe: read-only, no model changes, no network.
 
@@ -11,8 +12,8 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.8"
-    SCHEMA  = "alloy.sketchup.v6.3"
+    VERSION = "0.6.9"
+    SCHEMA  = "alloy.sketchup.v6.4"
     MM      = 25.4   # inches → mm
 
     FITTING_KEYS   = %w[p2o leg_ atira hafele basket l_channel u_channel channel
@@ -82,7 +83,7 @@ module Alloy
       case sym when :x then "width" when :y then "depth" when :z then "height" end
     end
 
-    def self.detect_cuts(e, tr)
+    def self.detect_cuts(e, tr, scales = nil)
       # Only ComponentInstances have a well-defined local coordinate system.
       return [] unless e.is_a?(Sketchup::ComponentInstance)
 
@@ -121,6 +122,13 @@ module Alloy
       v_origin = coord(bb.min, v_sym)
       u_size   = extents[u_sym]
       v_size   = extents[v_sym]
+
+      # Per-axis instance scale (default identity when not supplied)
+      sc      = scales || [1.0, 1.0, 1.0]
+      ax_sc   = { x: sc[0], y: sc[1], z: sc[2] }
+      u_scale = ax_sc[u_sym]
+      v_scale = ax_sc[v_sym]
+      t_scale = ax_sc[t_sym]
 
       tol = 0.01  # inch (~0.25 mm); used for normal check and edge detection
 
@@ -220,6 +228,25 @@ module Alloy
       # Real machining cuts are at least 3 mm wide, 5 mm long, 1 mm deep.
       cuts.select! { |c| c[:width_mm] >= 3.0 && c[:length_mm] >= 5.0 && c[:depth_mm] >= 1.0 }
 
+      # Apply per-axis instance scale to all cut coordinates
+      if scales
+        cuts = cuts.map do |c|
+          r_sym = { "width" => :x, "depth" => :y, "height" => :z }[c[:runs_along]]
+          w_sym = (face_syms - [r_sym]).first
+          r_sc  = ax_sc[r_sym] || 1.0
+          w_sc  = ax_sc[w_sym] || 1.0
+          c.merge(
+            depth_mm:  (c[:depth_mm]  * t_scale).round(1),
+            width_mm:  (c[:width_mm]  * w_sc).round(1),
+            length_mm: (c[:length_mm] * r_sc).round(1),
+            u_min_mm:  (c[:u_min_mm]  * u_scale).round(1),
+            u_max_mm:  (c[:u_max_mm]  * u_scale).round(1),
+            v_min_mm:  (c[:v_min_mm]  * v_scale).round(1),
+            v_max_mm:  (c[:v_max_mm]  * v_scale).round(1),
+          )
+        end
+      end
+
       cuts.sort_by { |c| [c[:face], c[:u_min_mm], c[:v_min_mm]] }
 
     rescue => ex
@@ -231,7 +258,7 @@ module Alloy
     # (U, V) in mm, origin at the panel min corner — same axis convention as detect_cuts.
     # Returns nil for groups, degenerate geometry, or anything that fails.
 
-    def self.face_outline(e)
+    def self.face_outline(e, scales = nil)
       return nil unless e.is_a?(Sketchup::ComponentInstance)
 
       defn = e.definition
@@ -281,10 +308,18 @@ module Alloy
 
       return nil if best_face.nil?
 
-      # Outer loop → project to (u, v) in mm relative to panel min corner
+      # Per-axis instance scale for u/v/thickness directions
+      sc      = scales || [1.0, 1.0, 1.0]
+      ax_sc   = { x: sc[0], y: sc[1], z: sc[2] }
+      u_scale = ax_sc[u_sym]
+      v_scale = ax_sc[v_sym]
+      t_scale = ax_sc[t_sym]
+
+      # Outer loop → project to (u, v) in mm relative to panel min corner, scaled
       raw_pts = best_face.outer_loop.vertices.map do |v|
         p = v.position
-        [mm(coord(p, u_sym) - u_origin), mm(coord(p, v_sym) - v_origin)]
+        [((coord(p, u_sym) - u_origin) * MM * u_scale).round(1),
+         ((coord(p, v_sym) - v_origin) * MM * v_scale).round(1)]
       end
 
       return nil if raw_pts.length < 3
@@ -300,7 +335,7 @@ module Alloy
       {
         u_axis:       axis_label(u_sym),
         v_axis:       axis_label(v_sym),
-        thickness_mm: mm(th),
+        thickness_mm: (th * MM * t_scale).round(1),
         loop:         deduped
       }
 
@@ -313,7 +348,7 @@ module Alloy
     # the two cross-section axes (mm, origin at min corner) plus run length.
     # Run axis = the LARGEST local extent. Returns nil on any failure; never raises.
 
-    def self.cross_section(e)
+    def self.cross_section(e, scales = nil)
       return nil unless e.is_a?(Sketchup::ComponentInstance)
 
       defn = e.definition
@@ -363,10 +398,18 @@ module Alloy
 
       return nil if best_face.nil?
 
-      # Project outer loop to (p, q) in mm relative to cross-section min corner
+      # Per-axis instance scale for p/q/run directions
+      sc      = scales || [1.0, 1.0, 1.0]
+      ax_sc   = { x: sc[0], y: sc[1], z: sc[2] }
+      p_scale = ax_sc[p_sym]
+      q_scale = ax_sc[q_sym]
+      r_scale = ax_sc[r_sym]
+
+      # Project outer loop to (p, q) in mm relative to cross-section min corner, scaled
       raw_pts = best_face.outer_loop.vertices.map do |v|
         pt = v.position
-        [mm(coord(pt, p_sym) - p_origin), mm(coord(pt, q_sym) - q_origin)]
+        [((coord(pt, p_sym) - p_origin) * MM * p_scale).round(1),
+         ((coord(pt, q_sym) - q_origin) * MM * q_scale).round(1)]
       end
 
       return nil if raw_pts.length < 3
@@ -381,7 +424,7 @@ module Alloy
         p_axis:   axis_label(p_sym),
         q_axis:   axis_label(q_sym),
         run_axis: axis_label(r_sym),
-        run_mm:   mm(r_extent),
+        run_mm:   (r_extent * MM * r_scale).round(1),
         loop:     deduped
       }
 
@@ -403,6 +446,18 @@ module Alloy
       }
     end
 
+    # Per-axis instance scale from transformation column magnitudes.
+    # t.xaxis/yaxis/zaxis are unit-normalised in some SU versions, so we derive
+    # scale from the raw 4×4 matrix (column-major, columns 0/1/2 are the local axes).
+    def self.instance_scales(e)
+      return [1.0, 1.0, 1.0] unless e.is_a?(Sketchup::ComponentInstance)
+      m = e.transformation.to_a
+      sx = Math.sqrt(m[0]**2 + m[1]**2 + m[2]**2)
+      sy = Math.sqrt(m[4]**2 + m[5]**2 + m[6]**2)
+      sz = Math.sqrt(m[8]**2 + m[9]**2 + m[10]**2)
+      [sx, sy, sz]
+    end
+
     # ── Inner tooling detection ───────────────────────────────────────────────
 
     # Fit a circle to a closed (u,v) loop in mm. Returns {cu,cv,r,residual} or nil.
@@ -422,7 +477,7 @@ module Alloy
 
     # Detect through-bores (inner loops of big faces) and blind pockets (interior
     # intermediate floor faces). Returns tooling[] (possibly empty). Never raises.
-    def self.detect_tooling(e, tr)
+    def self.detect_tooling(e, tr, scales = nil)
       return [] unless e.is_a?(Sketchup::ComponentInstance)
 
       defn = e.definition
@@ -453,6 +508,13 @@ module Alloy
       v_origin = coord(bb.min, v_sym)
       u_size   = extents[u_sym]
       v_size   = extents[v_sym]
+
+      # Per-axis instance scale (default identity when not supplied)
+      sc      = scales || [1.0, 1.0, 1.0]
+      ax_sc   = { x: sc[0], y: sc[1], z: sc[2] }
+      u_scale = ax_sc[u_sym]
+      v_scale = ax_sc[v_sym]
+      t_scale = ax_sc[t_sym]
 
       tol        = 0.01
       tooling    = []
@@ -585,6 +647,22 @@ module Alloy
         end
       end
 
+      if scales
+        face_avg_sc = (u_scale + v_scale) / 2.0
+        tooling = tooling.map do |ti|
+          scaled = ti.dup
+          scaled[:depth_mm] = (ti[:depth_mm] * t_scale).round(1)
+          if ti[:shape] == "circle"
+            scaled[:cu_mm]       = (ti[:cu_mm]       * u_scale).round(1)
+            scaled[:cv_mm]       = (ti[:cv_mm]       * v_scale).round(1)
+            scaled[:diameter_mm] = (ti[:diameter_mm] * face_avg_sc).round(1)
+          else
+            scaled[:loop] = ti[:loop].map { |u, v| [(u * u_scale).round(1), (v * v_scale).round(1)] }
+          end
+          scaled
+        end
+      end
+
       tooling
     rescue
       []
@@ -596,12 +674,13 @@ module Alloy
     # All computation is in definition LOCAL space — instance-independent.
 
     # Step 1: extract raw vertices+triangles from a definition.
-    def self.mesh_geometry(defn)
+    def self.mesh_geometry(defn, scales = nil)
+      sc = scales || [1.0, 1.0, 1.0]
       verts = []; tris = []; base = 0
       defn.entities.grep(Sketchup::Face).each do |f|
         pm  = f.mesh
         pts = pm.points
-        pts.each { |p| verts << [mm(p.x), mm(p.y), mm(p.z)] }
+        pts.each { |p| verts << [(mm(p.x) * sc[0]).round(1), (mm(p.y) * sc[1]).round(1), (mm(p.z) * sc[2]).round(1)] }
         pm.polygons.each do |poly|
           a, b, c = poly.map { |i| base + (i.abs - 1) }
           tris << [a, b, c]
@@ -627,8 +706,8 @@ module Alloy
 
     # Step 3: build geometry, key cache by "mesh_"+hash; identical geometry reuses.
     # Returns the cache key on success, nil on any failure.
-    def self.definition_mesh(defn)
-      geo = mesh_geometry(defn)
+    def self.definition_mesh(defn, scales = nil)
+      geo = mesh_geometry(defn, scales)
       return nil if geo.nil?
       key = "mesh_" + mesh_hash(geo)
       @mesh_cache[key] ||= geo
@@ -658,17 +737,28 @@ module Alloy
       if kids.empty?
         node[:role]    = "part"
         node[:is_leaf] = true
+        sx, sy, sz = instance_scales(e)
+        ws = (mm(bb.width)  * sx).round(1)
+        hs = (mm(bb.height) * sy).round(1)
+        ds = (mm(bb.depth)  * sz).round(1)
+        node[:size_mm]   = { x: ws, y: hs, z: ds }
+        node[:sorted_mm] = [ws, hs, ds].sort
+        # [14c-SCALE] temporary validation — remove after confirming against truth table
+        diag_n_14c = name_of(e)
+        if diag_n_14c =~ /\A(Top_Back#|Right_Side#|Leg_12cm#)/
+          puts "[SCALE] #{diag_n_14c} sx=#{sx.round(5)} sy=#{sy.round(5)} sz=#{sz.round(5)}"
+        end
         if has_any?(node[:name], FITTING_KEYS)
           # Fittings (legs, hinges, channels, etc.) — skip cut/tooling detection entirely.
           node[:cuts]    = []
           node[:tooling] = []
           # Non-channel fittings get a deduplicated mesh reference.
           if !has_any?(node[:name], ["l_channel","u_channel","channel"])
-            mk = (e.is_a?(Sketchup::ComponentInstance) ? definition_mesh(e.definition) : nil)
+            mk = (e.is_a?(Sketchup::ComponentInstance) ? definition_mesh(e.definition, [sx, sy, sz]) : nil)
             node[:mesh_ref] = mk unless mk.nil?
           end
         else
-          result = detect_cuts(e, tr)
+          result = detect_cuts(e, tr, [sx, sy, sz])
           if result == :complex
             node[:cuts]        = []
             node[:tooling]     = []
@@ -687,13 +777,13 @@ module Alloy
               }
             end
             node[:cuts]    = result
-            node[:tooling] = detect_tooling(e, tr)
+            node[:tooling] = detect_tooling(e, tr, [sx, sy, sz])
           end
         end
-        ol = face_outline(e)
+        ol = face_outline(e, [sx, sy, sz])
         node[:outline_mm] = ol unless ol.nil?
         if has_any?(node[:name], ["l_channel","u_channel","channel"])
-          pf = cross_section(e)
+          pf = cross_section(e, [sx, sy, sz])
           node[:profile_mm] = pf unless pf.nil?
         end
       else
