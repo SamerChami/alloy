@@ -1,4 +1,14 @@
-# main.rb — ALLOY Export v0.6.9
+# main.rb — ALLOY Export v0.6.11
+# v0.6.11 = corrected group reflection signal: the v0.6.10 parity-vs-root test
+#           was built on a disproven assumption. A named control model proved the
+#           normalized-basis determinant (det < 0 on the xaxis/yaxis/zaxis unit
+#           vectors) cleanly separates reflected from non-reflected on all cases
+#           including rotated groups. Replaced with that direct computation;
+#           @root_det_sign / world_det_sign removed. Schema unchanged (v6.5).
+# v0.6.10 = groups parity: generalised instance_scales, ungated face_outline /
+#           cross_section / detect_cuts / detect_tooling (source swapped to
+#           entities_of/local_bounds), additive `reflected` leaf field on groups.
+#           Schema alloy.sketchup.v6.5. Components byte-identical.
 # v0.6.9 = scale-aware export: measure instance (not definition) extents so
 #           non-uniformly scaled components report their true placed size.
 #           Schema alloy.sketchup.v6.4 (corrected magnitudes, same field layout).
@@ -12,8 +22,8 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.9"
-    SCHEMA  = "alloy.sketchup.v6.4"
+    VERSION = "0.6.11"
+    SCHEMA  = "alloy.sketchup.v6.5"
     MM      = 25.4   # inches → mm
 
     FITTING_KEYS   = %w[p2o leg_ atira hafele basket l_channel u_channel channel
@@ -27,6 +37,7 @@ module Alloy
     EDGE_TOL     = 1.0   # mm — used in detect_cuts rabbet/groove classification
     ROUND_TOL    = 0.08  # normalised residual threshold for circle vs polygon classification
     GROOVE_ASPECT = 4.0  # floor-face aspect ratio ≥ this → linear groove/dado → cuts[]; < this → pocket → tooling[]
+    ALLOY_DIAG    = false  # 15a groups diagnostic — off for the 15b parity build
 
     def self.mm(v); (v * MM).round(1); end
 
@@ -84,12 +95,12 @@ module Alloy
     end
 
     def self.detect_cuts(e, tr, scales = nil)
-      # Only ComponentInstances have a well-defined local coordinate system.
-      return [] unless e.is_a?(Sketchup::ComponentInstance)
+      # Groups and components both expose a usable local coordinate frame
+      # (component: definition; group: local_bounds + own entities — 15a Q4).
+      return [] unless instance?(e)
 
-      defn = e.definition
-      ents = defn.entities
-      bb   = defn.bounds
+      ents = entities_of(e)
+      bb   = local_bounds(e)
 
       bw = bb.width   # X extent (inches)
       bh = bb.height  # Y extent
@@ -259,10 +270,10 @@ module Alloy
     # Returns nil for groups, degenerate geometry, or anything that fails.
 
     def self.face_outline(e, scales = nil)
-      return nil unless e.is_a?(Sketchup::ComponentInstance)
+      return nil unless instance?(e)
 
-      defn = e.definition
-      bb   = defn.bounds
+      ents = entities_of(e)
+      bb   = local_bounds(e)
 
       bw = bb.width; bh = bb.height; bd = bb.depth
       return nil if bw < 0.001 || bh < 0.001 || bd < 0.001
@@ -294,7 +305,7 @@ module Alloy
       best_face  = nil
       best_area  = 0.0
 
-      defn.entities.each do |f|
+      ents.each do |f|
         next unless f.is_a?(Sketchup::Face)
         next if f.normal.dot(t_vec).abs < (1.0 - tol)
         t_val = coord(f.vertices.first.position, t_sym)
@@ -349,10 +360,10 @@ module Alloy
     # Run axis = the LARGEST local extent. Returns nil on any failure; never raises.
 
     def self.cross_section(e, scales = nil)
-      return nil unless e.is_a?(Sketchup::ComponentInstance)
+      return nil unless instance?(e)
 
-      defn = e.definition
-      bb   = defn.bounds
+      ents = entities_of(e)
+      bb   = local_bounds(e)
 
       bw = bb.width; bh = bb.height; bd = bb.depth
       return nil if bw < 0.001 || bh < 0.001 || bd < 0.001
@@ -384,7 +395,7 @@ module Alloy
       best_face = nil
       best_area = 0.0
 
-      defn.entities.each do |f|
+      ents.each do |f|
         next unless f.is_a?(Sketchup::Face)
         next if f.normal.dot(run_vec).abs < (1.0 - tol)
         t_val = coord(f.vertices.first.position, r_sym)
@@ -450,12 +461,155 @@ module Alloy
     # t.xaxis/yaxis/zaxis are unit-normalised in some SU versions, so we derive
     # scale from the raw 4×4 matrix (column-major, columns 0/1/2 are the local axes).
     def self.instance_scales(e)
-      return [1.0, 1.0, 1.0] unless e.is_a?(Sketchup::ComponentInstance)
+      # Column magnitudes of the raw transform are valid for groups too (15a Q3):
+      # the placed scale lives in the transform, local_bounds is the unit frame.
+      return [1.0, 1.0, 1.0] unless instance?(e)
       m = e.transformation.to_a
       sx = Math.sqrt(m[0]**2 + m[1]**2 + m[2]**2)
       sy = Math.sqrt(m[4]**2 + m[5]**2 + m[6]**2)
       sz = Math.sqrt(m[8]**2 + m[9]**2 + m[10]**2)
       [sx, sy, sz]
+    end
+
+    # ── Diagnostic dump (gated on ALLOY_DIAG) ────────────────────────────────
+
+    def self.diag_leaf(e, world_tr, lines)
+      is_grp   = e.is_a?(Sketchup::Group)
+      kind_str = is_grp ? "Group" : "ComponentInstance"
+      nm       = name_of(e)
+      respond_note = is_grp ? "  (respond_to?(:local_bounds)=#{e.respond_to?(:local_bounds)})" : ""
+
+      lines << ""
+      lines << "===== LEAF: #{nm}  [#{kind_str}]#{respond_note} ====="
+
+      # 3. Local bounds
+      lb   = local_bounds(e)
+      lmin = lb.min
+      lines << "local_bounds.min  = (#{lmin.x.round(4)}, #{lmin.y.round(4)}, #{lmin.z.round(4)}) in" \
+               "   ext = (#{mm(lb.width).round(3)}, #{mm(lb.height).round(3)}, #{mm(lb.depth).round(3)}) mm"
+
+      eb   = e.bounds
+      emin = eb.min
+      lines << "e.bounds.min      = (#{emin.x.round(4)}, #{emin.y.round(4)}, #{emin.z.round(4)}) in" \
+               "   ext = (#{mm(eb.width).round(3)}, #{mm(eb.height).round(3)}, #{mm(eb.depth).round(3)}) mm"
+
+      if e.is_a?(Sketchup::ComponentInstance)
+        db   = e.definition.bounds
+        dmin = db.min
+        lines << "defn.bounds.min   = (#{dmin.x.round(4)}, #{dmin.y.round(4)}, #{dmin.z.round(4)}) in" \
+                 "   ext = (#{mm(db.width).round(3)}, #{mm(db.height).round(3)}, #{mm(db.depth).round(3)}) mm"
+      else
+        lines << "defn.bounds.ext   = (n/a — group)"
+      end
+
+      # 4. Transform to_a (column-major)
+      t  = e.transformation
+      m  = t.to_a
+      mf = m.map { |v| v.round(6) }
+      lines << "xform.to_a        = [#{mf.join(', ')}]   (column-major)"
+
+      # 5. Derived basis axes (xaxis/yaxis/zaxis as returned by SU API)
+      xa = t.xaxis; ya = t.yaxis; za = t.zaxis
+      lines << "xaxis=(#{xa.x.round(6)}, #{xa.y.round(6)}, #{xa.z.round(6)})  len=#{xa.length.round(6)}"
+      lines << "yaxis=(#{ya.x.round(6)}, #{ya.y.round(6)}, #{ya.z.round(6)})  len=#{ya.length.round(6)}"
+      lines << "zaxis=(#{za.x.round(6)}, #{za.y.round(6)}, #{za.z.round(6)})  len=#{za.length.round(6)}"
+
+      # 6. Column-magnitude scale (instance_scales formula; computed for ALL leaves)
+      csx = Math.sqrt(m[0]**2 + m[1]**2 + m[2]**2)
+      csy = Math.sqrt(m[4]**2 + m[5]**2 + m[6]**2)
+      csz = Math.sqrt(m[8]**2 + m[9]**2 + m[10]**2)
+      star_note = is_grp ? "   (* computed for diagnosis; not applied to groups today)" : ""
+      lines << "instance_scales*  = (#{csx.round(6)}, #{csy.round(6)}, #{csz.round(6)})#{star_note}"
+
+      # 7. Determinant of 3×3 [xaxis|yaxis|zaxis] basis
+      cx  = ya.y * za.z - ya.z * za.y
+      cy  = ya.z * za.x - ya.x * za.z
+      cz  = ya.x * za.y - ya.y * za.x
+      det = xa.x * cx + xa.y * cy + xa.z * cz
+      det_str = "#{det >= 0 ? '+' : ''}#{det.round(6)}"
+      lines << "det(basis)        = #{det_str}"
+
+      # 8 & 9. World AABB (transform 8 local-bounds corners by accumulated world_tr)
+      corners = (0..7).map { |i| world_tr * lb.corner(i) rescue nil }.compact
+      if corners.length == 8
+        wxs = corners.map(&:x); wys = corners.map(&:y); wzs = corners.map(&:z)
+        wex = mm(wxs.max - wxs.min).round(3)
+        wey = mm(wys.max - wys.min).round(3)
+        wez = mm(wzs.max - wzs.min).round(3)
+        lines << "world.aabb.ext    = (#{wex}, #{wey}, #{wez}) mm  [X,Y,Z]"
+        thinnest = [["X", wex], ["Y", wey], ["Z", wez]].min_by { |_, v| v }.first
+        lines << "world.thinnest    = #{thinnest}"
+      else
+        lines << "world.aabb.ext    = (n/a — corner transform failed)"
+        lines << "world.thinnest    = n/a"
+      end
+
+      # 10. Face reachability — can existing face-projection logic reach group faces?
+      ents = entities_of(e)
+      if ents
+        all_faces = ents.select { |f| f.is_a?(Sketchup::Face) }
+        fc = all_faces.length
+        bw = lb.width; bh = lb.height; bd = lb.depth
+        if bw > 0.001 && bh > 0.001 && bd > 0.001
+          exts  = { x: bw, y: bh, z: bd }
+          t_sym, _ = exts.min_by { |_, v| v }
+          t_vec = case t_sym
+            when :x then Geom::Vector3d.new(1, 0, 0)
+            when :y then Geom::Vector3d.new(0, 1, 0)
+            when :z then Geom::Vector3d.new(0, 0, 1)
+          end
+          t_min_val = coord(lb.min, t_sym)
+          t_max_val = t_min_val + exts[t_sym]
+          tol = 0.01
+          thick_found = all_faces.any? do |f|
+            next false if f.normal.dot(t_vec).abs < (1.0 - tol)
+            tv = coord(f.vertices.first.position, t_sym) rescue nil
+            next false unless tv
+            (tv - t_min_val).abs <= tol || (tv - t_max_val).abs <= tol
+          end
+          lines << "faces=#{fc}  thickness_face_found=#{thick_found}"
+        else
+          lines << "faces=#{fc}  thickness_face_found=n/a (degenerate bounds)"
+        end
+      else
+        lines << "faces=n/a  thickness_face_found=n/a (entities_of returned nil)"
+      end
+
+      lines << "=" * 62
+    rescue => ex
+      lines << "[DIAG ERROR in leaf #{name_of(e) rescue '?'}: #{ex.class}: #{ex.message}]"
+      lines << "=" * 62
+    end
+
+    def self.diag_walk(e, parent_tr, lines)
+      tr   = parent_tr * e.transformation
+      kids = child_instances(e)
+      if kids.empty?
+        diag_leaf(e, tr, lines)
+      else
+        kids.each { |k| diag_walk(k, tr, lines) }
+      end
+    rescue => ex
+      lines << "[DIAG ERROR walking #{name_of(e) rescue '?'}: #{ex.class}: #{ex.message}]"
+    end
+
+    def self.run_diag(roots, identity, save_path)
+      lines = [
+        "ALLOY Groups Diagnostic  [v#{VERSION}]",
+        "Model: #{Sketchup.active_model.path rescue '?'}",
+        "Run:   #{Time.now}",
+        "=" * 62
+      ]
+      roots.each { |r| diag_walk(r, identity, lines) }
+      txt       = lines.join("\n") + "\n"
+      diag_path = File.join(File.dirname(save_path), "groups_diag.txt")
+      File.write(diag_path, txt)
+      puts "[ALLOY_DIAG] Written to: #{diag_path}"
+      puts txt
+      diag_path
+    rescue => ex
+      puts "[ALLOY_DIAG run error: #{ex.class}: #{ex.message}]"
+      nil
     end
 
     # ── Inner tooling detection ───────────────────────────────────────────────
@@ -478,11 +632,10 @@ module Alloy
     # Detect through-bores (inner loops of big faces) and blind pockets (interior
     # intermediate floor faces). Returns tooling[] (possibly empty). Never raises.
     def self.detect_tooling(e, tr, scales = nil)
-      return [] unless e.is_a?(Sketchup::ComponentInstance)
+      return [] unless instance?(e)
 
-      defn = e.definition
-      ents = defn.entities
-      bb   = defn.bounds
+      ents = entities_of(e)
+      bb   = local_bounds(e)
 
       bw = bb.width; bh = bb.height; bd = bb.depth
       return [] if bw < 0.001 || bh < 0.001 || bd < 0.001
@@ -743,10 +896,14 @@ module Alloy
         ds = (mm(bb.depth)  * sz).round(1)
         node[:size_mm]   = { x: ws, y: hs, z: ds }
         node[:sorted_mm] = [ws, hs, ds].sort
-        # [14c-SCALE] temporary validation — remove after confirming against truth table
-        diag_n_14c = name_of(e)
-        if diag_n_14c =~ /\A(Top_Back#|Right_Side#|Leg_12cm#)/
-          puts "[SCALE] #{diag_n_14c} sx=#{sx.round(5)} sy=#{sy.round(5)} sz=#{sz.round(5)}"
+        # Normalized-basis det — same signal components use; group-only so
+        # component output stays byte-identical.
+        if e.is_a?(Sketchup::Group)
+          ax = tr.xaxis.normalize; ay = tr.yaxis.normalize; az = tr.zaxis.normalize
+          det = ax.x*(ay.y*az.z - ay.z*az.y) \
+              - ay.x*(ax.y*az.z - ax.z*az.y) \
+              + az.x*(ax.y*ay.z - ax.z*ay.y)
+          node[:reflected] = det < 0
         end
         if has_any?(node[:name], FITTING_KEYS)
           # Fittings (legs, hinges, channels, etc.) — skip cut/tooling detection entirely.
@@ -890,6 +1047,7 @@ module Alloy
       return unless path
       path += ".json" unless path.downcase.end_with?(".json")
       File.write(path, JSON.pretty_generate(payload))
+      run_diag(roots, identity, path) if defined?(ALLOY_DIAG) && ALLOY_DIAG
       UI.messagebox("Exported #{trees.length} root item(s), #{total_parts} part(s).\n#{summary}\n\nSaved to:\n#{path}")
     end
 
