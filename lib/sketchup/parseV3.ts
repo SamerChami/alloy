@@ -7,22 +7,15 @@ export type { Cut, ToolingItem };
 
 // ── Schema validation ────────────────────────────────────────────────────────
 
-const SUPPORTED_SCHEMAS = [
-  "alloy.sketchup.v3",
-  "alloy.sketchup.v4",
-  "alloy.sketchup.v5",
-  "alloy.sketchup.v5.1",
-  "alloy.sketchup.v5.2",
-  "alloy.sketchup.v5.3",
-  "alloy.sketchup.v6",
-  "alloy.sketchup.v6.3",
-] as const;
+// Accept any alloy.sketchup.vN[.M] with major version ≥ 3.
+// Regex-based so minor schema bumps (v6.4, v7, …) never block import.
+const SCHEMA_PATTERN = /^alloy\.sketchup\.v([3-9]|\d{2,})(\.\d+)*$/;
 
-export type SupportedSchema = (typeof SUPPORTED_SCHEMAS)[number];
+export type SupportedSchema = string;
 
-/** Returns true for any schema version the app can ingest (v3 or v4). */
+/** Returns true for any alloy.sketchup.vN[.M] schema with major version ≥ 3. */
 export function isSupportedSchema(s: unknown): s is SupportedSchema {
-  return SUPPORTED_SCHEMAS.includes(s as SupportedSchema);
+  return typeof s === "string" && SCHEMA_PATTERN.test(s);
 }
 
 // ── JSON tree types ───────────────────────────────────────────────────────────

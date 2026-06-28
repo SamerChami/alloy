@@ -214,7 +214,7 @@ export const dict = {
     // SketchUp v3 importer (single + project)
     skuImportSingle:       "Import single cabinet",
     skuImportProject:      "Import project (bulk)",
-    skuInvalidFileV3:      "Invalid file — expected schema \"alloy.sketchup.v3\"",
+    skuInvalidFileV3:      "Invalid file — expected an alloy.sketchup.v3 or newer export",
     skuMultipleRootsNote:  "Multiple roots found — use Project import for all",
     skuPartsTable:         "Parts",
     skuPanelTag:           "Panel",
@@ -432,7 +432,7 @@ export const dict = {
     // SketchUp v3 importer (single + project)
     skuImportSingle:       "استيراد خزانة واحدة",
     skuImportProject:      "استيراد مشروع (مجمّع)",
-    skuInvalidFileV3:      "ملف غير صالح — يُتوقع مخطط \"alloy.sketchup.v3\"",
+    skuInvalidFileV3:      "ملف غير صالح — يُتوقع تصدير alloy.sketchup.v3 أو أحدث",
     skuMultipleRootsNote:  "تم اكتشاف جذور متعددة — استخدم استيراد المشروع لاستيراد كل الخزائن",
     skuPartsTable:         "الأجزاء",
     skuPanelTag:           "لوح",
