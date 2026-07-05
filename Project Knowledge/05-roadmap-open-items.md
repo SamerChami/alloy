@@ -1,6 +1,6 @@
 # ALLOY App — Phase Roadmap & Open Items
 
-> Reconciled against the actual STAGE task files through Stage 15 and the v6.5 export.
+> Reconciled against the actual STAGE task files through Stage 16 and the v6.6 export.
 > Supersedes the earlier roadmap, which stopped at Stage 7 / v4.
 
 ## Completed
@@ -97,9 +97,31 @@
   Replaced parity machinery with the direct det computation; `@root_det_sign` and
   `world_det_sign` removed. v0.6.11 / schema unchanged (v6.5).
 
-**Latest artifact:** the shipped export is **schema `alloy.sketchup.v6.5`, version
-`0.6.11`** (`alloy_export_0_6_11.rbz`). v0.6.10 was the initial groups-parity build
-(reflection signal was parity-relative; corrected in 15b-FIX).
+**Latest artifact (after Stage 15):** schema `alloy.sketchup.v6.5`, version `0.6.11`
+(`alloy_export_0_6_11.rbz`). v0.6.10 was the initial groups-parity build (reflection
+signal was parity-relative; corrected in 15b-FIX).
+
+### Stage 16 — Faithful per-leaf mesh for COMPLEX panels (schema v6.6) (CLOSED)
+- [x] **16 DIAG** — temporary `[16DIAG]` geometry probe added: logged face count,
+  normal stats, inner-loop count per leaf + gate verdict (`plain` / `complex`) to
+  Ruby Console + sidecar `mesh_diag.geomprobe.json`. Control model (`mesh_diag.skp`):
+  `plain` leaf (box, 6 faces, axis-aligned) → PLAIN; `mesh` leaf (through-cutout +
+  blind pocket + blind bore, non-box) → COMPLEX. Zero misfires. v0.6.11-diag, schema
+  unchanged.
+- [x] **16 MESH EMIT** — gate promoted to production (`leaf_is_plain?`): face_count==6,
+  all axis-aligned normals (±1e-3), exactly 6 distinct normals, no inner face loops →
+  PLAIN, else COMPLEX. COMPLEX non-fitting leaves emit `mesh_ref` into shared
+  `meshes{}` dict (same hash-dedup path as fittings). BOM fields preserved on all
+  leaves. `[16DIAG]` probe removed. VERSION 0.6.12 / SCHEMA v6.6.
+- [x] **Parser** — `V3Node.mesh_ref` comment updated to note v6.6+ panel leaves;
+  `cabinetToParts` already carried `mesh_ref` unconditionally — no gate to remove.
+- [x] **Viewer** — unified render priority: `mesh_ref` (1) → `outline_mm` (2) → box
+  (3). Mesh is the sole visual for COMPLEX leaves (no cuts/tooling overlay —
+  true geometry already contains cutouts). Matrix4 path, `matrixAutoUpdate=false`;
+  reflection-correct for `det=-1` orientations.
+
+**Latest artifact:** schema **`alloy.sketchup.v6.6`**, version **`0.6.12`**
+(`alloy_export_0_6_12.rbz`).
 
 ---
 
@@ -157,7 +179,7 @@ After installing a new `.rbz`, **always run both checks before exporting**:
    puts Alloy::Export::VERSION
    puts Alloy::Export::SCHEMA
    ```
-   Expected: `0.6.11` / `alloy.sketchup.v6.5` (or the current shipped version).
+   Expected: `0.6.12` / `alloy.sketchup.v6.6` (or the current shipped version).
    This reads loaded memory — the only reliable post-install version check, since
    file timestamps and Extension Manager UI can lag behind reality.
 
@@ -175,9 +197,13 @@ After installing a new `.rbz`, **always run both checks before exporting**:
   sourced via `entities_of`/`local_bounds`. Group reflection is the same
   normalized-basis `det(xaxis, yaxis, zaxis) < 0` test as components, pre-computed
   and emitted as the additive `reflected` boolean so the viewer never re-derives it.
+- **COMPLEX panels get faithful mesh** (v6.6) — leaves failing the plain gate
+  (`face_count≠6`, inner loops, non-axis-aligned normals, <6 distinct normals) emit
+  `mesh_ref` alongside all BOM fields. Viewer renders mesh as the sole visual (no
+  overlay). Plain box panels continue via the outline/box path unchanged.
 - Product **code** = leading slash-segment of the SketchUp name; join key to catalogue.
 - Import families kept separate: geometry importers (.3ds/.dxf) and SketchUp JSON
-  importers (v2 bulk; v3–v6.5 single/project).
+  importers (v2 bulk; v3–v6.6 single/project).
 
 ---
 

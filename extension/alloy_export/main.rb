@@ -1,4 +1,7 @@
-# main.rb — ALLOY Export v0.6.11
+# main.rb — ALLOY Export v0.6.12
+# v0.6.12 = mesh_ref for COMPLEX panel leaves (gate: face_count==6, axis-aligned,
+#           no inner loops, 6 distinct normals → PLAIN; else COMPLEX). Plain leaves
+#           unchanged. Fittings unchanged. Schema alloy.sketchup.v6.6.
 # v0.6.11 = corrected group reflection signal: the v0.6.10 parity-vs-root test
 #           was built on a disproven assumption. A named control model proved the
 #           normalized-basis determinant (det < 0 on the xaxis/yaxis/zaxis unit
@@ -22,8 +25,8 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.11"
-    SCHEMA  = "alloy.sketchup.v6.5"
+    VERSION = "0.6.12"
+    SCHEMA  = "alloy.sketchup.v6.6"
     MM      = 25.4   # inches → mm
 
     FITTING_KEYS   = %w[p2o leg_ atira hafele basket l_channel u_channel channel
@@ -612,6 +615,39 @@ module Alloy
       nil
     end
 
+    def self.leaf_is_plain?(e)
+      ents = entities_of(e)
+      return true unless ents
+      faces = ents.select { |f| f.is_a?(Sketchup::Face) }
+      return false unless faces.length == 6
+      return false if faces.any? { |f| f.loops.length > 1 }
+      normals = faces.map { |f| n = f.normal.normalize; [n.x.round(3), n.y.round(3), n.z.round(3)] }
+      return false unless normals.uniq.length == 6
+      axis_vecs = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]
+      faces.all? { |f|
+        n = f.normal.normalize
+        axis_vecs.any? { |ax|
+          (n.x - ax[0]).abs < 1e-3 && (n.y - ax[1]).abs < 1e-3 && (n.z - ax[2]).abs < 1e-3
+        }
+      }
+    rescue
+      true
+    end
+
+    def self.leaf_mesh_ref(e, sx, sy, sz)
+      if e.is_a?(Sketchup::ComponentInstance)
+        definition_mesh(e.definition, [sx, sy, sz])
+      elsif e.is_a?(Sketchup::Group)
+        geo = mesh_geometry(e, [sx, sy, sz])
+        return nil if geo.nil?
+        key = "mesh_" + mesh_hash(geo)
+        @mesh_cache[key] ||= geo
+        key
+      end
+    rescue
+      nil
+    end
+
     # ── Inner tooling detection ───────────────────────────────────────────────
 
     # Fit a circle to a closed (u,v) loop in mm. Returns {cu,cv,r,residual} or nil.
@@ -939,6 +975,12 @@ module Alloy
         end
         ol = face_outline(e, [sx, sy, sz])
         node[:outline_mm] = ol unless ol.nil?
+        unless has_any?(node[:name], FITTING_KEYS)
+          unless leaf_is_plain?(e)
+            mk = leaf_mesh_ref(e, sx, sy, sz)
+            node[:mesh_ref] = mk unless mk.nil?
+          end
+        end
         if has_any?(node[:name], ["l_channel","u_channel","channel"])
           pf = cross_section(e, [sx, sy, sz])
           node[:profile_mm] = pf unless pf.nil?

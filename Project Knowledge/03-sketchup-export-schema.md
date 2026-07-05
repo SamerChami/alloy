@@ -1,7 +1,7 @@
-# ALLOY App — SketchUp Export JSON Schema (alloy.sketchup.v6.5)
+# ALLOY App — SketchUp Export JSON Schema (alloy.sketchup.v6.6)
 
 ## Overview
-The ALLOY SketchUp extension (`alloy_export.rbz`, currently **v0.6.11**) exports a
+The ALLOY SketchUp extension (`alloy_export.rbz`, currently **v0.6.12**) exports a
 SketchUp model to a structured JSON file consumed by the app's import pipeline.
 
 Schema evolution: **v2** (flat items) → **v3** (nested tree) → **v4** (tree +
@@ -10,8 +10,22 @@ world-space `open_normal`) → **v6** (fitting `mesh` geometry + `mesh_ref` dedu
 **v6.3** (reflection-correct orientation finalized) → **v6.4** (scale-aware export:
 instance scale baked into all measurements) → **v6.5** (groups reach full parity
 with components: oriented + scale-aware geometry, plus an additive `reflected`
-leaf field). This document describes **v6.5**, the current format. Older shapes are
-summarized at the bottom.
+leaf field) → **v6.6** (faithful per-leaf mesh for COMPLEX panels: `mesh_ref` now
+also emitted on non-plain panel leaves). This document describes **v6.6**, the
+current format. Older shapes are summarized at the bottom.
+
+> **What changed in v6.6 (Stage 16 — faithful per-leaf mesh for COMPLEX panels):**
+> Non-fitting panel leaves that fail the **plain gate** now also emit `mesh_ref`.
+> **Gate rule (`leaf_is_plain?`):** a leaf is PLAIN iff it has exactly 6 faces,
+> all axis-aligned normals (within 1e-3 of ±X/Y/Z), exactly 6 distinct normals
+> (rounded 3dp), and no inner face loops (no through-holes). Any leaf that fails
+> any condition is COMPLEX and gets a `mesh_ref` into the shared `meshes{}` dict.
+> BOM data (`cuts`, `tooling`, `outline_mm`, `sorted_mm`, `size_mm`) is preserved
+> unchanged on all leaves regardless of PLAIN/COMPLEX. `mesh_ref` keys are content
+> hashes (same dedup infrastructure as fittings). Plain box panels are unaffected —
+> they continue to be rendered via the `outline_mm` / box path. v6.5 output is
+> backward-compatible (all parsers that ignore unknown `mesh_ref` fields on panel
+> leaves remain correct).
 
 > **What changed in v6.5 (Stages 15b + 15b-FIX — groups parity):** previously
 > every oriented and scale-aware path (`instance_scales`, `face_outline`,
@@ -47,7 +61,7 @@ summarized at the bottom.
 
 ```json
 {
-  "schema": "alloy.sketchup.v6.5",
+  "schema": "alloy.sketchup.v6.6",
   "version": "0.6.11",
   "model": "test.skp",
   "units": "mm",
@@ -106,7 +120,7 @@ Nodes nest via `children[]`. **A model is a tree, not a flat list.**
 | `role` | leaves | Semantic role: `side_left`, `side_right`, `top`, `bottom`, `back`, `drawer_front`, `other`, etc. Drives panel-local axis routing in the viewer. |
 | `outline_mm` | panel leaves | Oriented 2D silhouette + thickness. **Authoritative source for oriented panel sizing.** See below. |
 | `profile_mm` | channel leaves | Extruded cross-section for channel fittings. |
-| `mesh_ref` | fitting leaves | Key into top-level `meshes{}` for arbitrary fitting geometry (legs, etc.). |
+| `mesh_ref` | fitting leaves; COMPLEX panel leaves (v6.6+) | Key into top-level `meshes{}` for arbitrary geometry. Fittings always; non-plain panels from v6.6 (see gate rule above). |
 | `open_normal` | panel leaves | Outward face normal in **world space** (v5+; was panel-local pre-v5 — do not regress). |
 | `cuts[]` | panel leaves | Detected machining cuts (linear grooves/dados/rabbets/through). Empty array if none. |
 | `tooling[]` | panel leaves | Detected drilling/pocketing (through-bores + blind pockets), circle or polygon. Empty array if none. |
@@ -274,15 +288,15 @@ against `products.code`. The old `^[BWTPC]\d+` convention (B600, W800) is supers
 | `/products/import` (.3ds) | binary .3ds | assembled geometry, real positions |
 | `/products/import` (.dxf) | Polyboard DXF | legacy; flat-layout, synthesized 3D |
 | `/products/import-sketchup` | `alloy.sketchup.v2` | bulk catalog (flat `items[]`) |
-| `/products/import-sketchup-single` | `alloy.sketchup.v3`–`v6.5` | one cabinet → one product |
-| `/products/import-sketchup-project` | `alloy.sketchup.v3`–`v6.5` | many cabinets → bulk |
+| `/products/import-sketchup-single` | `alloy.sketchup.v3`–`v6.6` | one cabinet → one product |
+| `/products/import-sketchup-project` | `alloy.sketchup.v3`–`v6.6` | many cabinets → bulk |
 
 > The single/project importers' schema gate accepts the `alloy.sketchup.v*` family
 > (major ≥ 3). The recursive parser (`lib/sketchup/parseV3.ts`) carries `cuts`,
 > `axes`, `outline_mm`, `profile_mm`, `mesh_ref`, and `open_normal`. v6.5 is
 > additive over v6.4 (group leaves now populate `outline_mm`/`cuts`/`tooling` and
-> carry `reflected`); existing parsers read it unchanged — consuming `reflected` in
-> the viewer is a separate, optional step.
+> carry `reflected`); v6.6 is additive over v6.5 (COMPLEX panel leaves now also
+> carry `mesh_ref`). Existing parsers read both unchanged.
 
 ---
 
@@ -308,4 +322,10 @@ dedupe; reflection handling finalized across all render paths.
 geometry (`outline_mm`, `cuts`, `tooling`, `profile_mm`, scaled `size_mm`) on the
 same paths as components, plus an additive `reflected` boolean on group leaves
 (normalized-basis `det < 0` — the same clean signal components use; validated with
-a named 8-leaf control model). Component output byte-identical to v6.4 (current).
+a named 8-leaf control model). Component output byte-identical to v6.4.
+
+**v6.6** — v6.5 + **complex panel mesh**: non-fitting leaves that fail the plain
+gate (`face_count ≠ 6`, inner loops, non-axis-aligned normals, or < 6 distinct
+normals) now emit `mesh_ref` into the shared `meshes{}` dict. BOM fields (`cuts`,
+`tooling`, `outline_mm`, `sorted_mm`, `size_mm`) preserved on all leaves.
+Plain box panels unchanged. Viewer render priority: mesh_ref → outline_mm → box.

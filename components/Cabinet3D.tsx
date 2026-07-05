@@ -336,7 +336,47 @@ export function Cabinet3D({
           continue;
         }
 
-        // Outline extrusion path: use when outline + orient are both present (v5.1+)
+        // Priority 1 (panels): faithful mesh for complex leaves (v6.6+) — sole visual, no cuts/tooling overlay
+        if (box.mesh_ref && meshes?.[box.mesh_ref] && box.orient) {
+          const md = meshes[box.mesh_ref];
+          let mnX = Infinity, mnY = Infinity, mnZ = Infinity;
+          let mxX = -Infinity, mxY = -Infinity, mxZ = -Infinity;
+          for (const v of md.vertices) {
+            if (v[0] < mnX) mnX = v[0]; if (v[0] > mxX) mxX = v[0];
+            if (v[1] < mnY) mnY = v[1]; if (v[1] > mxY) mxY = v[1];
+            if (v[2] < mnZ) mnZ = v[2]; if (v[2] > mxZ) mxZ = v[2];
+          }
+          const bcx = (mnX + mxX) / 2;
+          const bcy = (mnY + mxY) / 2;
+          const bcz = (mnZ + mxZ) / 2;
+          const panelGeo = new THREE.BufferGeometry();
+          const vpos = new Float32Array(md.vertices.length * 3);
+          md.vertices.forEach((v, i) => {
+            vpos[i*3  ] = (v[0] - bcx) / 1000;
+            vpos[i*3+1] = (v[1] - bcy) / 1000;
+            vpos[i*3+2] = (v[2] - bcz) / 1000;
+          });
+          panelGeo.setAttribute("position", new THREE.BufferAttribute(vpos, 3));
+          panelGeo.setIndex(md.triangles.flat());
+          panelGeo.computeVertexNormals();
+          const o = box.orient;
+          const m4 = new THREE.Matrix4();
+          m4.set(
+            o[0], o[3], o[6], box.x,
+            o[1], o[4], o[7], box.y,
+            o[2], o[5], o[8], box.z,
+            0, 0, 0, 1,
+          );
+          const panelObj = new THREE.Group();
+          addPartToGroup(panelObj, panelGeo, ROLE_COLOR[box.role] ?? 0xD9D5CE, isWireframe);
+          panelObj.matrixAutoUpdate = false;
+          panelObj.matrix.copy(m4);
+          panelObj.matrixWorldNeedsUpdate = true;
+          group.add(panelObj);
+          continue;
+        }
+
+        // Priority 2 (panels): outline extrusion — use when outline + orient are both present (v5.1+)
         if (box.outline && box.orient) {
           const ol        = box.outline;
           const thickness = ol.thickness_mm / 1000;

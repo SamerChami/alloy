@@ -50,7 +50,7 @@ export type V3Node = {
     run_mm:   number;
     loop:     [number, number][];
   };
-  // v6 fields (non-channel fitting leaves only)
+  // v6 fields (non-channel fitting leaves; v6.6+ also complex panel leaves)
   mesh_ref?: string;
   // v6.3 fields (panel leaves only)
   tooling?: ToolingItem[];
@@ -65,7 +65,7 @@ export type V3Json = {
   total_parts?: number;    // present from v0.4.1+; null/absent in older exports
   summary: Record<string, number>;
   roots: V3Node[];
-  // v6: deduped fitting meshes keyed by component definition name
+  // v6: deduped geometry meshes keyed by content hash (fittings + complex panels from v6.6)
   meshes?: Record<string, { vertices: [number, number, number][]; triangles: [number, number, number][] }>;
 };
 
