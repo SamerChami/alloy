@@ -14,6 +14,7 @@ type SizeRow = {
   depth_mm: number;
   calc_price_jod: number | null;
   price_jod: number;
+  price_overridden: boolean;
   parts: number;
 };
 
@@ -41,7 +42,7 @@ export function StandardSizes({ productId }: { productId: string }) {
     const supabase = createClient();
     const { data, error: err } = await supabase
       .from("product_sizes")
-      .select("id, label, width_mm, height_mm, depth_mm, calc_price_jod, price_jod")
+      .select("id, label, width_mm, height_mm, depth_mm, calc_price_jod, price_jod, price_overridden")
       .eq("product_id", productId)
       .order("width_mm")
       .order("height_mm")
@@ -67,6 +68,7 @@ export function StandardSizes({ productId }: { productId: string }) {
       depth_mm: Number(r.depth_mm),
       calc_price_jod: r.calc_price_jod != null ? Number(r.calc_price_jod) : null,
       price_jod: Number(r.price_jod),
+      price_overridden: Boolean(r.price_overridden),
       parts: counts.get(r.id as string) ?? 0,
     }));
     setSizes(rows);
@@ -100,13 +102,24 @@ export function StandardSizes({ productId }: { productId: string }) {
       .update({ label, price_jod: price, price_overridden: true })
       .eq("id", row.id);
     if (err) { setError(err.message); return; }
-    setSizes((rs) => rs.map((r) => (r.id === row.id ? { ...r, label, price_jod: price } : r)));
+    await load();
+  }
+
+  async function resetToCalculated(id: string) {
+    setError(null);
+    const { error: err } = await createClient()
+      .from("product_sizes")
+      .update({ price_overridden: false })
+      .eq("id", id);
+    if (err) { setError(err.message); return; }
+    await load();
   }
 
   async function handleAdd() {
     const w = Math.round(parseFloat(add.w));
     const h = Math.round(parseFloat(add.h));
     const dp = Math.round(parseFloat(add.d));
+    const typed = add.price.trim() !== "";
     const price = parseFloat(add.price) || 0;
     if (!(w > 0 && h > 0 && dp > 0) || price < 0) return;
     setAdding(true);
@@ -118,7 +131,7 @@ export function StandardSizes({ productId }: { productId: string }) {
       height_mm: h,
       depth_mm: dp,
       price_jod: price,
-      price_overridden: true,
+      price_overridden: typed,
     });
     setAdding(false);
     if (err) {
@@ -183,14 +196,26 @@ export function StandardSizes({ productId }: { productId: string }) {
                   {row.calc_price_jod != null ? jod(row.calc_price_jod) : "—"}
                 </td>
                 <td className="px-3 py-1.5">
-                  <input
-                    className="input w-32"
-                    type="number" min="0" step="0.001" dir="ltr"
-                    value={drafts[row.id]?.price ?? ""}
-                    onChange={(e) => setDraft(row.id, { price: e.target.value })}
-                    onBlur={() => saveRow(row)}
-                    onKeyDown={blurOnEnter}
-                  />
+                  <div className="flex items-center gap-1">
+                    <input
+                      className={`input w-32 ${row.price_overridden ? "" : "text-slate"}`}
+                      type="number" min="0" step="0.001" dir="ltr"
+                      title={row.price_overridden ? undefined : t("priceIsCalculated")}
+                      value={drafts[row.id]?.price ?? ""}
+                      onChange={(e) => setDraft(row.id, { price: e.target.value })}
+                      onBlur={() => saveRow(row)}
+                      onKeyDown={blurOnEnter}
+                    />
+                    {row.price_overridden && row.calc_price_jod != null && (
+                      <button
+                        type="button"
+                        className="btn-ghost text-xs whitespace-nowrap"
+                        onClick={() => resetToCalculated(row.id)}
+                      >
+                        {t("useCalculated")}
+                      </button>
+                    )}
+                  </div>
                 </td>
                 <td className="px-3 py-1.5">
                   {confirmId === row.id ? (

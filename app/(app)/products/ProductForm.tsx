@@ -11,6 +11,7 @@ import {
   panelPartCost,
   componentPartCost,
   rollup,
+  type PricingSettings,
 } from "@/lib/pricing";
 import type { TKey } from "@/lib/i18n";
 import dynamic from "next/dynamic";
@@ -46,6 +47,7 @@ type FormState = {
   margin_pct: string;
   price_overridden: boolean;
   is_template: boolean;
+  default_panel_id: string;
 };
 
 function fromProduct(p: Product | null): FormState {
@@ -68,6 +70,7 @@ function fromProduct(p: Product | null): FormState {
     margin_pct: p?.margin_pct != null ? String(p.margin_pct) : "0",
     price_overridden: p?.price_overridden ?? false,
     is_template: p?.is_template ?? true,
+    default_panel_id: p?.default_panel_id ?? "",
   };
 }
 
@@ -129,6 +132,7 @@ export function ProductForm({
   panels,
   allComponents,
   bandingTypes,
+  pricingSettings,
   onClose,
   onSaved,
 }: {
@@ -136,6 +140,7 @@ export function ProductForm({
   panels: PanelOption[];
   allComponents: ComponentOption[];
   bandingTypes: BandingType[];
+  pricingSettings: PricingSettings;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -172,14 +177,12 @@ export function ProductForm({
     const panelCosts = bomLines
       .filter((l) => l.line_type === "panel")
       .map((l) => {
-        const panel = panels.find((p) => p.id === l.panel_id);
-        if (!panel?.sheet_length_mm || !panel?.sheet_width_mm || !panel?.sheet_price_jod)
-          return { material: 0, banding: 0 };
-        const ppm2 = panelPricePerM2(
-          panel.sheet_length_mm,
-          panel.sheet_width_mm,
-          panel.sheet_price_jod,
-        );
+        const panel = panels.find((p) => p.id === (l.panel_id || form.default_panel_id));
+        // No usable board: material is 0 but banding is still counted (matches price_bom).
+        const ppm2 =
+          panel?.sheet_length_mm && panel?.sheet_width_mm && panel?.sheet_price_jod
+            ? panelPricePerM2(panel.sheet_length_mm, panel.sheet_width_mm, panel.sheet_price_jod)
+            : 0;
         const bt = bandingTypes.find((b) => b.id === l.banding_type_id);
         return panelPartCost({
           widthMm: parseFloat(l.width_mm) || 0,
@@ -188,6 +191,7 @@ export function ProductForm({
           pricePerM2: ppm2,
           bandedLenM: parseFloat(l.banded_length_m) || 0,
           bandingRate: bt?.price_per_m_jod ?? 0,
+          wastePct: pricingSettings.wastePct,
         });
       });
 
@@ -201,8 +205,18 @@ export function ProductForm({
     return rollup(panelCosts, componentCosts, {
       laborJod: parseFloat(form.labor_jod) || 0,
       marginPct: parseFloat(form.margin_pct) || 0,
+      roundingStepJod: pricingSettings.roundingStepJod,
     });
-  }, [bomLines, panels, allComponents, bandingTypes, form.labor_jod, form.margin_pct]);
+  }, [
+    bomLines,
+    panels,
+    allComponents,
+    bandingTypes,
+    form.labor_jod,
+    form.margin_pct,
+    form.default_panel_id,
+    pricingSettings,
+  ]);
 
   // Build real-position panel array when BOM lines have saved 3D positions
   const rawPanels3D = useMemo<RawPanel3D[] | undefined>(() => {
@@ -272,6 +286,7 @@ export function ProductForm({
       margin_pct: parseFloat(form.margin_pct) || 0,
       price_overridden: form.price_overridden,
       is_template: form.is_template,
+      default_panel_id: form.default_panel_id || null,
       materials_cost_jod: rollupResult.materials,
       components_cost_jod: rollupResult.components,
       base_cost_jod: rollupResult.base,
@@ -446,6 +461,8 @@ export function ProductForm({
               panels={panels}
               allComponents={allComponents}
               bandingTypes={bandingTypes}
+              defaultPanelId={form.default_panel_id}
+              pricingSettings={pricingSettings}
             />
           )}
 
@@ -480,7 +497,7 @@ export function ProductForm({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">{t("laborJod")}</label>
                 <input
@@ -494,6 +511,22 @@ export function ProductForm({
                   className="input" type="number" min="0" step="0.01" dir="ltr"
                   value={form.margin_pct} onChange={set("margin_pct")}
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">{t("defaultBoard")}</label>
+                <select
+                  className="input"
+                  value={form.default_panel_id}
+                  onChange={set("default_panel_id")}
+                >
+                  <option value="">{t("defaultBoardNone")}</option>
+                  {panels.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {(lang === "ar" && p.name_ar ? p.name_ar : p.name_en) +
+                        (p.sku ? ` (${p.sku})` : "")}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

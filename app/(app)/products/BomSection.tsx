@@ -7,6 +7,7 @@ import {
   panelPricePerM2,
   panelPartCost,
   componentPartCost,
+  type PricingSettings,
 } from "@/lib/pricing";
 import { PART_ROLES } from "@/lib/cabinet3d";
 import type {
@@ -69,21 +70,16 @@ function getLineCost(
   panels: PanelOption[],
   allComponents: ComponentOption[],
   bandingTypes: BandingType[],
+  defaultPanelId: string,
+  wastePct: number,
 ): number {
   if (line.line_type === "panel") {
-    const panel = panels.find((p) => p.id === line.panel_id);
-    if (
-      !panel ||
-      !panel.sheet_length_mm ||
-      !panel.sheet_width_mm ||
-      !panel.sheet_price_jod
-    )
-      return 0;
-    const ppm2 = panelPricePerM2(
-      panel.sheet_length_mm,
-      panel.sheet_width_mm,
-      panel.sheet_price_jod,
-    );
+    const panel = panels.find((p) => p.id === (line.panel_id || defaultPanelId));
+    // No usable board: material is 0 but banding is still counted (matches price_bom).
+    const ppm2 =
+      panel?.sheet_length_mm && panel?.sheet_width_mm && panel?.sheet_price_jod
+        ? panelPricePerM2(panel.sheet_length_mm, panel.sheet_width_mm, panel.sheet_price_jod)
+        : 0;
     const bt = bandingTypes.find((b) => b.id === line.banding_type_id);
     const { material, banding } = panelPartCost({
       widthMm: parseFloat(line.width_mm) || 0,
@@ -92,6 +88,7 @@ function getLineCost(
       pricePerM2: ppm2,
       bandedLenM: parseFloat(line.banded_length_m) || 0,
       bandingRate: bt?.price_per_m_jod ?? 0,
+      wastePct,
     });
     return material + banding;
   } else {
@@ -109,6 +106,8 @@ type Props = {
   panels: PanelOption[];
   allComponents: ComponentOption[];
   bandingTypes: BandingType[];
+  defaultPanelId: string;
+  pricingSettings: PricingSettings;
 };
 
 export function BomSection({
@@ -117,6 +116,8 @@ export function BomSection({
   panels,
   allComponents,
   bandingTypes,
+  defaultPanelId,
+  pricingSettings,
 }: Props) {
   const { t, lang } = useLang();
 
@@ -178,7 +179,14 @@ export function BomSection({
                 {t("panelMaterial")}
               </div>
               {panelLines.map((line) => {
-                const cost = getLineCost(line, panels, allComponents, bandingTypes);
+                const cost = getLineCost(
+                  line,
+                  panels,
+                  allComponents,
+                  bandingTypes,
+                  defaultPanelId,
+                  pricingSettings.wastePct,
+                );
                 return (
                   <div
                     key={line._key}
@@ -210,7 +218,9 @@ export function BomSection({
                             update(line._key, { panel_id: e.target.value })
                           }
                         >
-                          <option value="">—</option>
+                          <option value="">
+                            {defaultPanelId ? t("usesDefaultBoard") : "—"}
+                          </option>
                           {panels.map((p) => (
                             <option key={p.id} value={p.id}>
                               {pLabel(p)}
@@ -394,7 +404,14 @@ export function BomSection({
                 {t("components")}
               </div>
               {compLines.map((line) => {
-                const cost = getLineCost(line, panels, allComponents, bandingTypes);
+                const cost = getLineCost(
+                  line,
+                  panels,
+                  allComponents,
+                  bandingTypes,
+                  defaultPanelId,
+                  pricingSettings.wastePct,
+                );
                 return (
                   <div
                     key={line._key}

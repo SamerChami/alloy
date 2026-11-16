@@ -8,7 +8,9 @@ import { PageTitle } from "@/components/ui/blocks";
 import { jod } from "@/lib/utils";
 import { productSubcategories, type SubcategoryConfig } from "@/lib/catalog";
 import type { TKey } from "@/lib/i18n";
+import type { PricingSettings } from "@/lib/pricing";
 import { ProductForm } from "./ProductForm";
+import { PricingSettingsCard } from "./PricingSettingsCard";
 import type { Product } from "./types";
 import type { PanelOption, ComponentOption, BandingType } from "./bom_types";
 
@@ -129,12 +131,14 @@ export function ProductsShell({
   panels,
   allComponents,
   bandingTypes,
+  pricingSettings,
 }: {
   initialProducts: Product[];
   isOffice: boolean;
   panels: PanelOption[];
   allComponents: ComponentOption[];
   bandingTypes: BandingType[];
+  pricingSettings: PricingSettings;
 }) {
   const { t, lang } = useLang();
   const router = useRouter();
@@ -195,6 +199,8 @@ export function ProductsShell({
   return (
     <div>
       <PageTitle titleKey="products" />
+
+      {isOffice && <PricingSettingsCard settings={pricingSettings} />}
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
@@ -311,6 +317,7 @@ export function ProductsShell({
           panels={panels}
           allComponents={allComponents}
           bandingTypes={bandingTypes}
+          pricingSettings={pricingSettings}
           onClose={() => setFormOpen(false)}
           onSaved={handleSaved}
         />

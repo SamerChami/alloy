@@ -22,4 +22,6 @@ export type Product = {
   materials_cost_jod?: number;
   components_cost_jod?: number;
   base_cost_jod?: number;
+  default_panel_id?: string | null;
+  calc_price_jod?: number | null;
 };

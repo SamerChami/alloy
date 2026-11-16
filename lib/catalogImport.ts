@@ -177,7 +177,7 @@ export async function addStandardSize(
           label,
           ...dims,
           price_jod: 0,
-          price_overridden: true,
+          price_overridden: false,
           source_filename: meta.source_filename,
         })
         .select("id")
