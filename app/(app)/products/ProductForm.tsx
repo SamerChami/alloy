@@ -160,12 +160,6 @@ export function ProductForm({
         const lines = (data ?? []).map(dbLineToBomState);
         setBomLines(lines);
         setLoadingBom(false);
-        // debug: report how many cuts were loaded (remove after 8b ships)
-        const cutsTotal = lines.reduce((n, l) => n + (l.cuts?.length ?? 0), 0);
-        const panelsWithCuts = lines.filter((l) => (l.cuts?.length ?? 0) > 0).length;
-        if (cutsTotal > 0) {
-          console.debug(`[cuts] ${cutsTotal} cuts across ${panelsWithCuts} panels`);
-        }
       });
   }, [product?.id]);
 

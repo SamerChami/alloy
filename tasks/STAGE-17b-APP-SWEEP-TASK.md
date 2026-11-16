@@ -56,6 +56,17 @@ modified. Run `git diff --stat -- tasks/` and
   `git checkout -- tasks/STAGE-15-CLEANUP-TASK.md tasks/STAGE-16-DIAG-GEOMETRY.md tasks/STAGE-16-MESH-EMIT-TASK.md`
 - If there are real text changes: leave them, and list them in the report.
 
+### 6. Delete the stray empty folder
+There is an empty folder under `app/` whose name starts with `{login,dashboard,`
+(a `mkdir` brace expansion that went wrong). Confirm it is empty:
+
+    Get-ChildItem -LiteralPath app -Directory | Where-Object Name -like '{*'
+    Get-ChildItem -LiteralPath (Get-ChildItem -LiteralPath app -Directory | Where-Object Name -like '{*').FullName
+
+If the second command lists nothing, delete that one folder with
+`Remove-Item -LiteralPath <its full path>`. If it contains anything, STOP and
+report. Do not touch `app/(app)` or `app/login`.
+
 ## DO NOT
 - Do NOT touch the `[12FIX]` `console.warn` lines in `lib/cabinet3d.ts`;
   they are fallback guards.

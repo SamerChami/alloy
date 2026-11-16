@@ -555,7 +555,6 @@ export function Cabinet3D({
           group.add(lines);
           geo.dispose();
           if (showCuts && box.cuts && box.cuts.length > 0) {
-            console.log("[11D-CHK]", box.part_name, "→ addCutMeshes(wf) bw=", box.w, "bh=", box.h, "bd=", box.d);
             addCutMeshes(lines, box.cuts, box.w, box.h, box.d, true,
               { x: box.x, y: box.y, z: box.z },
               { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 },
@@ -590,7 +589,6 @@ export function Cabinet3D({
           const edgesGeo = new THREE.EdgesGeometry(geo);
           mesh.add(new THREE.LineSegments(edgesGeo, new THREE.LineBasicMaterial({ color: 0x5a5a52 })));
           if (showCuts && box.cuts && box.cuts.length > 0) {
-            console.log("[11D-CHK]", box.part_name, "→ addCutMeshes(solid) bw=", box.w, "bh=", box.h, "bd=", box.d);
             addCutMeshes(mesh, box.cuts, box.w, box.h, box.d, false,
               { x: box.x, y: box.y, z: box.z },
               { x: cW / 1000 / 2, y: cH / 1000 / 2, z: cD / 1000 / 2 },
