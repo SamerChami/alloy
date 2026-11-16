@@ -50,4 +50,7 @@ export type BomLineState = {
   // v4 cut data (undefined = not yet ingested / v3 source; [] = ingested, 0 cuts)
   cuts?: Cut[];
   cutWarning?: string;
+  // Hole data from the DXF importer; carried through save untouched.
+  hole_count?: number;
+  holes_json?: unknown;
 };

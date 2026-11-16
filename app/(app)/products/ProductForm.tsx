@@ -90,6 +90,8 @@ function dbLineToBomState(row: Record<string, unknown>): BomLineState {
     // v4 cut data: parse jsonb back to typed array; undefined when column is null (v3 source)
     cuts: row.cuts_json != null ? (row.cuts_json as Cut[]) : undefined,
     cutWarning: (row.cut_warning as string | null) ?? undefined,
+    hole_count: (row.hole_count as number | null) ?? 0,
+    holes_json: row.holes_json ?? null,
   };
 }
 
@@ -112,6 +114,10 @@ function bomStateToInsert(line: BomLineState, productId: string, idx: number) {
     pos_x_mm: line.pos_x_mm !== "" && line.pos_x_mm != null ? parseFloat(line.pos_x_mm) : null,
     pos_y_mm: line.pos_y_mm !== "" && line.pos_y_mm != null ? parseFloat(line.pos_y_mm) : null,
     pos_z_mm: line.pos_z_mm !== "" && line.pos_z_mm != null ? parseFloat(line.pos_z_mm) : null,
+    hole_count: line.hole_count ?? 0,
+    holes_json: line.holes_json ?? null,
+    cuts_json: line.cuts ?? null,
+    cut_warning: line.cutWarning ?? null,
   };
 }
 
@@ -224,13 +230,13 @@ export function ProductForm({
 
   // Auto-fill unit price from rollup when not overridden and BOM has loaded
   useEffect(() => {
-    if (!form.price_overridden && !loadingBom) {
+    if (!form.price_overridden && !loadingBom && bomLines.length > 0) {
       setForm((prev) => ({
         ...prev,
         unit_price_jod: String(rollupResult.calcPrice),
       }));
     }
-  }, [rollupResult.calcPrice, form.price_overridden, loadingBom]);
+  }, [rollupResult.calcPrice, form.price_overridden, loadingBom, bomLines.length]);
 
   function set(key: keyof FormState) {
     return (
@@ -242,7 +248,7 @@ export function ProductForm({
 
   function buildPayload(pricingOverride?: number) {
     const finalPrice =
-      form.price_overridden
+      form.price_overridden || bomLines.length === 0
         ? (parseFloat(form.unit_price_jod) || 0)
         : (pricingOverride ?? rollupResult.calcPrice);
     return {
@@ -271,14 +277,11 @@ export function ProductForm({
 
   async function saveBomLines(productId: string) {
     const supabase = createClient();
-    await supabase.from("bom_lines").delete().eq("product_id", productId);
-    if (bomLines.length > 0) {
-      const { error: err } = await supabase
-        .from("bom_lines")
-        .insert(bomLines.map((l, i) => bomStateToInsert(l, productId, i)));
-      if (err) return err.message;
-    }
-    return null;
+    const { error: err } = await supabase.rpc("replace_bom_lines", {
+      p_product_id: productId,
+      p_lines: bomLines.map((l, i) => bomStateToInsert(l, productId, i)),
+    });
+    return err ? err.message : null;
   }
 
   async function handleSubmit(e: React.FormEvent) {
