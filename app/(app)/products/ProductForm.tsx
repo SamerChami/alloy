@@ -15,6 +15,7 @@ import {
 import type { TKey } from "@/lib/i18n";
 import dynamic from "next/dynamic";
 import { BomSection, newBomKey } from "./BomSection";
+import { StandardSizes } from "./StandardSizes";
 import type { BomLineState, PanelOption, ComponentOption, BandingType, Cut } from "./bom_types";
 import type { Product } from "./types";
 import type { RawPanel3D } from "@/lib/cabinet3d";
@@ -157,6 +158,7 @@ export function ProductForm({
       .from("bom_lines")
       .select("*")
       .eq("product_id", product.id)
+      .is("size_id", null)
       .order("sort_order")
       .then(({ data }) => {
         const lines = (data ?? []).map(dbLineToBomState);
@@ -446,6 +448,9 @@ export function ProductForm({
               bandingTypes={bandingTypes}
             />
           )}
+
+          {/* ── Standard sizes (existing products only) ── */}
+          {product?.id && <StandardSizes productId={product.id} />}
 
           {/* ── 3D preview ── */}
           {bomLines.some(l => l.line_type === "panel") && (

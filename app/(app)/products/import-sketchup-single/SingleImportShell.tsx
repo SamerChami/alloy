@@ -8,6 +8,11 @@ import { useLang } from "@/components/lang-provider";
 import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
 import { codeFromName, codeKey } from "@/lib/productCode";
+import {
+  panelsToBomRows,
+  updateCatalogueEntry,
+  addStandardSize,
+} from "@/lib/catalogImport";
 import type { SkuPanel3D } from "@/lib/cabinet3d";
 import {
   type V3Json,
@@ -37,8 +42,10 @@ export function SingleImportShell() {
   const [filename, setFilename]       = useState("");
   const [importing, setImporting]     = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
-  const [importResult, setImportResult] = useState<{ name: string; panels: number } | null>(null);
-  const [existingCodes, setExistingCodes] = useState<Set<string>>(new Set());
+  const [importResult, setImportResult] = useState<
+    { name: string; panels: number; message?: string } | null
+  >(null);
+  const [existingCodes, setExistingCodes] = useState<Map<string, string>>(new Map());
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -70,8 +77,10 @@ export function SingleImportShell() {
         const { panels: ps, fittings: fs } = cabinetToParts(root);
 
         const { data: codeRows } = await createClient()
-          .from("products").select("code").not("code", "is", null);
-        setExistingCodes(new Set((codeRows ?? []).map((r) => codeKey(r.code as string))));
+          .from("products").select("id, code").not("code", "is", null);
+        setExistingCodes(
+          new Map((codeRows ?? []).map((r) => [codeKey(r.code as string), r.id as string])),
+        );
 
         setParsed(json);
         setFilename(file.name);
@@ -97,7 +106,25 @@ export function SingleImportShell() {
   }
 
   const code = parsed ? codeFromName(parsed.roots[0].name) : null;
-  const codeTaken = code != null && existingCodes.has(codeKey(code));
+  const existingId = code != null ? (existingCodes.get(codeKey(code)) ?? null) : null;
+  const codeTaken = existingId != null;
+
+  async function handleExisting(action: "update" | "add_size") {
+    if (!parsed || !existingId) return;
+    setImporting(true);
+    setImportError(null);
+    const root = parsed.roots[0];
+    const meta = { source_filename: parsed.model, export_version: parsed.version ?? null };
+    const fn = action === "update" ? updateCatalogueEntry : addStandardSize;
+    const err = await fn(createClient(), existingId, root, panels, meta);
+    setImporting(false);
+    if (err) { setImportError(err); return; }
+    setImportResult({
+      name: cabinetName.trim() || root.name,
+      panels: panels.length,
+      message: t(action === "update" ? "importUpdatedOk" : "importSizeAddedOk"),
+    });
+  }
 
   async function handleCreate() {
     if (!parsed) return;
@@ -140,34 +167,10 @@ export function SingleImportShell() {
     }
 
     if (panels.length > 0) {
-      const bomRows = panels.map((part, i) => {
-        const { thickness, width, height } = cutListDims(part);
-        return {
-          product_id: prod.id,
-          line_type: "panel",
-          panel_id: null,
-          part_name: part.name,
-          width_mm: width,
-          height_mm: height,
-          banding_type_id: null,
-          banded_length_m: 0,
-          component_id: null,
-          qty: 1,
-          sort_order: i,
-          part_role: inferRole(part.name),
-          depth_mm: thickness,
-          pos_offset_mm: null,
-          pos_x_mm: part.pos.x,
-          pos_y_mm: part.pos.y,
-          pos_z_mm: part.pos.z,
-          hole_count: 0,
-          // v4: persist cut data; null when source was v3 (no cut data at all)
-          cuts_json: part.cuts !== undefined ? part.cuts : null,
-          cut_warning: part.cutWarning ?? null,
-        };
+      const { error: e2 } = await supabase.rpc("replace_bom_lines", {
+        p_product_id: prod.id,
+        p_lines: panelsToBomRows(panels),
       });
-
-      const { error: e2 } = await supabase.from("bom_lines").insert(bomRows);
       if (e2) {
         await supabase.from("products").delete().eq("id", prod.id);
         setImporting(false);
@@ -241,9 +244,10 @@ export function SingleImportShell() {
         <div className="border border-sage/40 bg-sage/10 rounded-lg p-4 flex items-center gap-3">
           <CheckCircle size={16} className="text-sage shrink-0" />
           <p className="text-sm text-sage font-medium">
-            {t("skuImportSingleSuccess")
-              .replace("{name}", importResult.name)
-              .replace("{panels}", String(importResult.panels))}
+            {importResult.message ??
+              t("skuImportSingleSuccess")
+                .replace("{name}", importResult.name)
+                .replace("{panels}", String(importResult.panels))}
           </p>
           <button
             type="button"
@@ -280,7 +284,7 @@ export function SingleImportShell() {
                   {code ?? t("codeMissing")}
                 </span>
               </div>
-              {codeTaken && <p className="text-xs text-rust mt-1">{t("codeExists")}</p>}
+              {codeTaken && <p className="text-xs text-brass mt-1">{t("codeInCatalogue")}</p>}
             </div>
             {dims && (
               <div>
@@ -387,15 +391,36 @@ export function SingleImportShell() {
 
           {importError && <p className="text-sm text-rust">{importError}</p>}
 
-          <div className="flex justify-end">
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={importing || panels.length + fittings.length === 0 || codeTaken}
-              onClick={handleCreate}
-            >
-              {importing ? "…" : t("createProduct")}
-            </button>
+          <div className="flex justify-end gap-3">
+            {codeTaken ? (
+              <>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={importing || panels.length === 0}
+                  onClick={() => handleExisting("update")}
+                >
+                  {importing ? "…" : t("importUpdateEntry")}
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={importing || panels.length === 0}
+                  onClick={() => handleExisting("add_size")}
+                >
+                  {importing ? "…" : t("importAddSize")}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={importing || panels.length + fittings.length === 0}
+                onClick={handleCreate}
+              >
+                {importing ? "…" : t("createProduct")}
+              </button>
+            )}
           </div>
         </>
       )}

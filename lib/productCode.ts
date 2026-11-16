@@ -38,6 +38,16 @@ export function itemNumberFromName(name: string | null | undefined): string | nu
   return hasItemNumber(parts) ? parts[0] : null;
 }
 
+/**
+ * Whatever follows the code ("90" in "156__B-2D-K3__90", "80 x 46" in
+ * "13__W-2D-K1__80 x 46"): a size or a description. Null when there is none.
+ */
+export function descriptionFromName(name: string | null | undefined): string | null {
+  const parts = nameParts(name);
+  const rest = parts.slice(hasItemNumber(parts) ? 2 : 1).filter((p) => p !== "");
+  return rest.length > 0 ? rest.join(" ") : null;
+}
+
 /** Normalised form used for comparing codes. */
 export function codeKey(code: string): string {
   return code.trim().toLowerCase();

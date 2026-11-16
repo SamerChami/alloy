@@ -8,12 +8,16 @@ import { useLang } from "@/components/lang-provider";
 import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
 import { codeFromName, codeKey } from "@/lib/productCode";
+import {
+  panelsToBomRows,
+  updateCatalogueEntry,
+  addStandardSize,
+} from "@/lib/catalogImport";
 import type { SkuPanel3D } from "@/lib/cabinet3d";
 import {
   type V3Json,
   type V3Node,
   cabinetToParts,
-  cutListDims,
   rootDims,
   isSupportedSchema,
 } from "@/lib/sketchup/parseV3";
@@ -28,6 +32,8 @@ type CabinetRow = {
   selected: boolean;
   code: string | null;
   status: "new" | "in_catalogue" | "duplicate_in_file";
+  action: "create" | "skip" | "update" | "add_size";
+  productId: string | null; // existing catalogue product, when status is in_catalogue
   panelCount: number;
   fittingCount: number;
 };
@@ -47,7 +53,9 @@ export function ProjectImportShell() {
   const [importing, setImporting]     = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [progress, setProgress]       = useState("");
-  const [importResult, setImportResult] = useState<{ cabinets: number; panels: number } | null>(null);
+  const [importResult, setImportResult] = useState<
+    { created: number; updated: number; sizes: number; panels: number } | null
+  >(null);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -79,15 +87,21 @@ export function ProjectImportShell() {
         }
 
         const { data: codeRows } = await createClient()
-          .from("products").select("code").not("code", "is", null);
-        const existing = new Set((codeRows ?? []).map((r) => codeKey(r.code as string)));
+          .from("products").select("id, code").not("code", "is", null);
+        const existing = new Map(
+          (codeRows ?? []).map((r) => [codeKey(r.code as string), r.id as string]),
+        );
         const seenInFile = new Set<string>();
         const newRows: CabinetRow[] = items.map((root) => {
           const code = codeFromName(root.name);
           let status: CabinetRow["status"] = "new";
+          let productId: string | null = null;
           if (code != null) {
             const key = codeKey(code);
-            if (existing.has(key)) status = "in_catalogue";
+            if (existing.has(key)) {
+              status = "in_catalogue";
+              productId = existing.get(key) ?? null;
+            }
             else if (seenInFile.has(key)) status = "duplicate_in_file";
             seenInFile.add(key);
           }
@@ -96,6 +110,8 @@ export function ProjectImportShell() {
             root,
             code,
             status,
+            productId,
+            action: status === "new" ? "create" : "skip",
             selected: status === "new" && AUTO_TICK.has(root.item_type),
             panelCount: panels.length,
             fittingCount: fittings.length,
@@ -125,8 +141,26 @@ export function ProjectImportShell() {
 
   function toggleRow(idx: number) {
     setRows((rs) =>
+      rs.map((r, i) => {
+        if (i !== idx) return r;
+        if (r.status === "new") return { ...r, selected: !r.selected };
+        if (r.status === "in_catalogue") {
+          // Unticking = Skip; ticking without a choice = the non-destructive "add size".
+          return r.selected
+            ? { ...r, selected: false, action: "skip" }
+            : { ...r, selected: true, action: "add_size" };
+        }
+        return r;
+      }),
+    );
+  }
+
+  function setAction(idx: number, action: CabinetRow["action"]) {
+    setRows((rs) =>
       rs.map((r, i) =>
-        i === idx && r.status === "new" ? { ...r, selected: !r.selected } : r,
+        i === idx && r.status === "in_catalogue"
+          ? { ...r, action, selected: action !== "skip" }
+          : r,
       ),
     );
   }
@@ -136,7 +170,9 @@ export function ProjectImportShell() {
   }
 
   function deselectAll() {
-    setRows((rs) => rs.map((r) => ({ ...r, selected: false })));
+    setRows((rs) =>
+      rs.map((r) => ({ ...r, selected: false, action: r.status === "new" ? "create" : "skip" })),
+    );
   }
 
   async function handleImport() {
@@ -151,6 +187,9 @@ export function ProjectImportShell() {
     const supabase = createClient();
     let totalPanels = 0;
     let importedCount = 0;
+    let created = 0;
+    let updated = 0;
+    let sizes = 0;
 
     for (const row of selected) {
       const { root } = row;
@@ -158,6 +197,27 @@ export function ProjectImportShell() {
 
       const dims = rootDims(root);
       const { panels } = cabinetToParts(root);
+
+      if (row.action === "update" || row.action === "add_size") {
+        if (!row.productId) {
+          setImporting(false);
+          setImportError("Product not found");
+          return;
+        }
+        const meta = { source_filename: parsed.model, export_version: parsed.version ?? null };
+        const fn = row.action === "update" ? updateCatalogueEntry : addStandardSize;
+        const err = await fn(supabase, row.productId, root, panels, meta);
+        if (err) {
+          setImporting(false);
+          setImportError(err);
+          return;
+        }
+        if (row.action === "update") updated++;
+        else sizes++;
+        totalPanels += panels.length;
+        importedCount++;
+        continue;
+      }
 
       const { data: prod, error: e1 } = await supabase
         .from("products")
@@ -187,34 +247,10 @@ export function ProjectImportShell() {
       }
 
       if (panels.length > 0) {
-        const bomRows = panels.map((part, i) => {
-          const { thickness, width, height } = cutListDims(part);
-          return {
-            product_id: prod.id,
-            line_type: "panel",
-            panel_id: null,
-            part_name: part.name,
-            width_mm: width,
-            height_mm: height,
-            banding_type_id: null,
-            banded_length_m: 0,
-            component_id: null,
-            qty: 1,
-            sort_order: i,
-            part_role: inferRole(part.name),
-            depth_mm: thickness,
-            pos_offset_mm: null,
-            pos_x_mm: part.pos.x,
-            pos_y_mm: part.pos.y,
-            pos_z_mm: part.pos.z,
-            hole_count: 0,
-            // v4: persist cut data; null when source was v3 (no cut data at all)
-            cuts_json: part.cuts !== undefined ? part.cuts : null,
-            cut_warning: part.cutWarning ?? null,
-          };
+        const { error: e2 } = await supabase.rpc("replace_bom_lines", {
+          p_product_id: prod.id,
+          p_lines: panelsToBomRows(panels),
         });
-
-        const { error: e2 } = await supabase.from("bom_lines").insert(bomRows);
         if (e2) {
           await supabase.from("products").delete().eq("id", prod.id);
           setImporting(false);
@@ -225,12 +261,13 @@ export function ProjectImportShell() {
         totalPanels += panels.length;
       }
 
+      created++;
       importedCount++;
     }
 
     setImporting(false);
     setProgress("");
-    setImportResult({ cabinets: importedCount, panels: totalPanels });
+    setImportResult({ created, updated, sizes, panels: totalPanels });
   }
 
   const selectedCount = rows.filter((r) => r.selected).length;
@@ -305,11 +342,21 @@ export function ProjectImportShell() {
       {importResult && (
         <div className="border border-sage/40 bg-sage/10 rounded-lg p-4 flex items-center gap-3">
           <CheckCircle size={16} className="text-sage shrink-0" />
-          <p className="text-sm text-sage font-medium">
-            {t("skuImportSuccess")
-              .replace("{cabinets}", String(importResult.cabinets))
-              .replace("{panels}", String(importResult.panels))}
-          </p>
+          <div className="text-sm text-sage font-medium">
+            {importResult.created > 0 && (
+              <p>
+                {t("skuImportSuccess")
+                  .replace("{cabinets}", String(importResult.created))
+                  .replace("{panels}", String(importResult.panels))}
+              </p>
+            )}
+            {importResult.updated > 0 && (
+              <p>{t("importUpdateEntry")}: {importResult.updated}</p>
+            )}
+            {importResult.sizes > 0 && (
+              <p>{t("importAddSize")}: {importResult.sizes}</p>
+            )}
+          </div>
           <button
             type="button"
             className="ms-auto btn-ghost text-sm"
@@ -398,7 +445,7 @@ export function ProjectImportShell() {
                             type="checkbox"
                             className="w-4 h-4 accent-brass"
                             checked={row.selected}
-                            disabled={row.status !== "new"}
+                            disabled={row.status === "duplicate_in_file"}
                             onChange={() => toggleRow(idx)}
                             onClick={(e) => e.stopPropagation()}
                           />
@@ -413,12 +460,28 @@ export function ProjectImportShell() {
                         </td>
                         <td className="px-3 py-2 font-mono text-xs" dir="ltr">
                           {row.code ?? "—"}
-                          {row.status !== "new" && (
-                            <span className="ms-2 text-xs text-slate font-sans">
-                              {row.status === "in_catalogue"
-                                ? t("codeInCatalogue")
-                                : t("codeDuplicateInFile")}
-                            </span>
+                          {row.status === "in_catalogue" ? (
+                            <>
+                              <span className="ms-2 text-xs text-slate font-sans">
+                                {t("codeInCatalogue")}
+                              </span>
+                              <select
+                                className="input ms-2 text-xs py-0.5 w-auto font-sans"
+                                value={row.action}
+                                onChange={(e) => setAction(idx, e.target.value as CabinetRow["action"])}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <option value="skip">{t("importSkip")}</option>
+                                <option value="update">{t("importUpdateEntry")}</option>
+                                <option value="add_size">{t("importAddSize")}</option>
+                              </select>
+                            </>
+                          ) : (
+                            row.status === "duplicate_in_file" && (
+                              <span className="ms-2 text-xs text-slate font-sans">
+                                {t("codeDuplicateInFile")}
+                              </span>
+                            )
                           )}
                         </td>
                         <td className="px-3 py-2 text-xs text-slate" dir="ltr">

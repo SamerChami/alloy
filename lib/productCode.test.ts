@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codeFromName, codeKey, itemNumberFromName } from "./productCode";
+import { codeFromName, codeKey, descriptionFromName, itemNumberFromName } from "./productCode";
 
 describe("codeFromName", () => {
   it("takes the text before the first double underscore", () => {
@@ -53,5 +53,19 @@ describe("itemNumberFromName", () => {
 describe("codeKey", () => {
   it("compares case-insensitively", () => {
     expect(codeKey("BDR.K3")).toBe(codeKey(" bdr.k3 "));
+  });
+});
+
+describe("descriptionFromName", () => {
+  it("returns what follows the code", () => {
+    expect(descriptionFromName("156__B-2D-K3__90")).toBe("90");
+    expect(descriptionFromName("13__W-2D-K1__80 x 46")).toBe("80 x 46");
+    expect(descriptionFromName("WQC2.K3__80*80")).toBe("80*80");
+    expect(descriptionFromName("BDR.K3__120__left door")).toBe("120 left door");
+  });
+  it("returns null when nothing follows the code", () => {
+    expect(descriptionFromName("Coffee_Corner")).toBeNull();
+    expect(descriptionFromName("3__WH-1RD-K1")).toBeNull();
+    expect(descriptionFromName("156__")).toBeNull();
   });
 });
