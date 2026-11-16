@@ -43,6 +43,9 @@ function ProductRow({
           </div>
         )}
       </td>
+      <td className="px-4 py-3 text-slate tabular-nums text-sm font-mono" dir="ltr">
+        {p.code ?? "—"}
+      </td>
       <td className="px-4 py-3 text-slate tabular-nums text-sm" dir="ltr">
         {p.sku ?? "—"}
       </td>
@@ -100,6 +103,7 @@ function ProductTable({
           <thead>
             <tr className="border-b border-line bg-mist">
               <th className="text-start px-4 py-3 font-medium">{t("nameEn")}</th>
+              <th className="text-start px-4 py-3 font-medium">{t("code")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("sku")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("unit")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("unitPrice")}</th>
@@ -152,7 +156,8 @@ export function ProductsShell({
         (p) =>
           p.name_en.toLowerCase().includes(q) ||
           (p.name_ar ?? "").toLowerCase().includes(q) ||
-          (p.sku ?? "").toLowerCase().includes(q)
+          (p.sku ?? "").toLowerCase().includes(q) ||
+          (p.code ?? "").toLowerCase().includes(q)
       );
     }
     return list;

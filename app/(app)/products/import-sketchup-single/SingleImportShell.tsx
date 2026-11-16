@@ -7,6 +7,7 @@ import { Upload, AlertTriangle, ChevronLeft, CheckCircle, Info } from "lucide-re
 import { useLang } from "@/components/lang-provider";
 import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
+import { codeFromName, codeKey } from "@/lib/productCode";
 import type { SkuPanel3D } from "@/lib/cabinet3d";
 import {
   type V3Json,
@@ -37,6 +38,7 @@ export function SingleImportShell() {
   const [importing, setImporting]     = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{ name: string; panels: number } | null>(null);
+  const [existingCodes, setExistingCodes] = useState<Set<string>>(new Set());
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -67,6 +69,10 @@ export function SingleImportShell() {
         const root = json.roots[0];
         const { panels: ps, fittings: fs } = cabinetToParts(root);
 
+        const { data: codeRows } = await createClient()
+          .from("products").select("code").not("code", "is", null);
+        setExistingCodes(new Set((codeRows ?? []).map((r) => codeKey(r.code as string))));
+
         setParsed(json);
         setFilename(file.name);
         setCabinetName(root.name);
@@ -90,6 +96,9 @@ export function SingleImportShell() {
     if (f) handleFile(f);
   }
 
+  const code = parsed ? codeFromName(parsed.roots[0].name) : null;
+  const codeTaken = code != null && existingCodes.has(codeKey(code));
+
   async function handleCreate() {
     if (!parsed) return;
     setImporting(true);
@@ -103,6 +112,7 @@ export function SingleImportShell() {
       .from("products")
       .insert({
         name_en: cabinetName.trim() || root.name,
+        code,
         item_kind: "product",
         subcategory: "Cabinet",
         unit: "pcs",
@@ -121,7 +131,11 @@ export function SingleImportShell() {
 
     if (e1 || !prod) {
       setImporting(false);
-      setImportError(e1?.message ?? "Insert failed");
+      setImportError(
+        e1?.message.includes("products_code_unique")
+          ? t("codeExists")
+          : (e1?.message ?? "Insert failed"),
+      );
       return;
     }
 
@@ -260,6 +274,13 @@ export function SingleImportShell() {
                 onChange={(e) => setCabinetName(e.target.value)}
                 dir="ltr"
               />
+              <div className="mt-2 text-xs text-slate">
+                {t("code")}:{" "}
+                <span className="font-mono text-sm text-ink" dir="ltr">
+                  {code ?? t("codeMissing")}
+                </span>
+              </div>
+              {codeTaken && <p className="text-xs text-rust mt-1">{t("codeExists")}</p>}
             </div>
             {dims && (
               <div>
@@ -370,7 +391,7 @@ export function SingleImportShell() {
             <button
               type="button"
               className="btn-primary"
-              disabled={importing || panels.length + fittings.length === 0}
+              disabled={importing || panels.length + fittings.length === 0 || codeTaken}
               onClick={handleCreate}
             >
               {importing ? "…" : t("createProduct")}

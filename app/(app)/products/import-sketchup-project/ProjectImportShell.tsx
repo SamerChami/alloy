@@ -7,6 +7,7 @@ import { Upload, AlertTriangle, ChevronLeft, CheckCircle } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
+import { codeFromName, codeKey } from "@/lib/productCode";
 import type { SkuPanel3D } from "@/lib/cabinet3d";
 import {
   type V3Json,
@@ -25,7 +26,13 @@ const Cabinet3D = dynamic(
 type CabinetRow = {
   root: V3Node;
   selected: boolean;
+  code: string | null;
+  status: "new" | "in_catalogue" | "duplicate_in_file";
+  panelCount: number;
+  fittingCount: number;
 };
+
+const AUTO_TICK = new Set(["Cabinet", "Other", "Part"]);
 
 export function ProjectImportShell() {
   const { t } = useLang();
@@ -65,15 +72,39 @@ export function ProjectImportShell() {
           return;
         }
 
-        const cabinets = json.roots.filter((r) => r.item_type === "Cabinet");
-        if (cabinets.length === 0) {
-          setParseError(t("skuNoCabinets"));
+        const items = json.roots.filter((r) => r.item_type !== "RoomBox");
+        if (items.length === 0) {
+          setParseError(t("skuNoItems"));
           return;
         }
 
+        const { data: codeRows } = await createClient()
+          .from("products").select("code").not("code", "is", null);
+        const existing = new Set((codeRows ?? []).map((r) => codeKey(r.code as string)));
+        const seenInFile = new Set<string>();
+        const newRows: CabinetRow[] = items.map((root) => {
+          const code = codeFromName(root.name);
+          let status: CabinetRow["status"] = "new";
+          if (code != null) {
+            const key = codeKey(code);
+            if (existing.has(key)) status = "in_catalogue";
+            else if (seenInFile.has(key)) status = "duplicate_in_file";
+            seenInFile.add(key);
+          }
+          const { panels, fittings } = cabinetToParts(root);
+          return {
+            root,
+            code,
+            status,
+            selected: status === "new" && AUTO_TICK.has(root.item_type),
+            panelCount: panels.length,
+            fittingCount: fittings.length,
+          };
+        });
+
         setParsed(json);
         setFilename(file.name);
-        setRows(cabinets.map((root) => ({ root, selected: true })));
+        setRows(newRows);
       } catch {
         setParseError(t("skuInvalidFileV3"));
       }
@@ -93,11 +124,15 @@ export function ProjectImportShell() {
   }
 
   function toggleRow(idx: number) {
-    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, selected: !r.selected } : r)));
+    setRows((rs) =>
+      rs.map((r, i) =>
+        i === idx && r.status === "new" ? { ...r, selected: !r.selected } : r,
+      ),
+    );
   }
 
   function selectAll() {
-    setRows((rs) => rs.map((r) => ({ ...r, selected: true })));
+    setRows((rs) => rs.map((r) => ({ ...r, selected: r.status === "new" })));
   }
 
   function deselectAll() {
@@ -128,6 +163,7 @@ export function ProjectImportShell() {
         .from("products")
         .insert({
           name_en: root.name,
+          code: row.code,
           item_kind: "product",
           subcategory: "Cabinet",
           unit: "pcs",
@@ -200,7 +236,7 @@ export function ProjectImportShell() {
   const selectedCount = rows.filter((r) => r.selected).length;
 
   const skippedTypes = parsed?.summary
-    ? Object.entries(parsed.summary).filter(([type]) => type !== "Cabinet")
+    ? Object.entries(parsed.summary).filter(([type]) => type === "RoomBox")
     : [];
 
   // Build skuPanels for the focused row (panels + fittings both rendered)
@@ -296,7 +332,7 @@ export function ProjectImportShell() {
               <div className="border border-brass/40 bg-brass/5 rounded-lg px-3 py-2">
                 <div className="text-xs text-slate">{t("skuCabinetsLabel")}</div>
                 <div className="text-2xl font-bold text-brass">
-                  {parsed.summary.Cabinet ?? rows.length}
+                  {rows.length}
                 </div>
               </div>
               {skippedTypes.map(([type, count]) => (
@@ -337,6 +373,8 @@ export function ProjectImportShell() {
                   <tr className="border-b border-line text-xs text-slate">
                     <th className="px-3 py-2 w-8" />
                     <th className="text-start px-3 py-2 font-medium">{t("nameEn")}</th>
+                    <th className="text-start px-3 py-2 font-medium">{t("code")}</th>
+                    <th className="text-start px-3 py-2 font-medium">{t("skuItemType")}</th>
                     <th className="text-start px-3 py-2 font-medium">{t("overallDims")} (mm)</th>
                     <th className="text-start px-3 py-2 font-medium">{t("detectedPanels")}</th>
                     <th className="text-start px-3 py-2 font-medium">{t("skuFittings")}</th>
@@ -360,6 +398,7 @@ export function ProjectImportShell() {
                             type="checkbox"
                             className="w-4 h-4 accent-brass"
                             checked={row.selected}
+                            disabled={row.status !== "new"}
                             onChange={() => toggleRow(idx)}
                             onClick={(e) => e.stopPropagation()}
                           />
@@ -372,16 +411,29 @@ export function ProjectImportShell() {
                             {row.root.name}
                           </span>
                         </td>
+                        <td className="px-3 py-2 font-mono text-xs" dir="ltr">
+                          {row.code ?? "—"}
+                          {row.status !== "new" && (
+                            <span className="ms-2 text-xs text-slate font-sans">
+                              {row.status === "in_catalogue"
+                                ? t("codeInCatalogue")
+                                : t("codeDuplicateInFile")}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate" dir="ltr">
+                          {row.root.item_type}
+                        </td>
                         <td className="px-3 py-2 tabular-nums text-xs" dir="ltr">
                           {Math.round(d.width_mm)}×
                           {Math.round(d.height_mm)}×
                           {Math.round(d.depth_mm)}
                         </td>
                         <td className="px-3 py-2 text-center tabular-nums">
-                          {row.root.panel_count ?? "—"}
+                          {row.panelCount}
                         </td>
                         <td className="px-3 py-2 text-center tabular-nums text-slate">
-                          {row.root.fitting_count ?? "—"}
+                          {row.fittingCount}
                         </td>
                       </tr>
                     );

@@ -28,6 +28,7 @@ const UNITS = ["pcs", "sheet", "m", "m2", "set", "kg", "roll", "other"] as const
 
 type FormState = {
   sku: string;
+  code: string;
   name_en: string;
   name_ar: string;
   subcategory: string;
@@ -49,6 +50,7 @@ type FormState = {
 function fromProduct(p: Product | null): FormState {
   return {
     sku: p?.sku ?? "",
+    code: p?.code ?? "",
     name_en: p?.name_en ?? "",
     name_ar: p?.name_ar ?? "",
     subcategory: p?.subcategory ?? productSubcategories[0].value,
@@ -232,6 +234,10 @@ export function ProductForm({
     }
   }, [rollupResult.calcPrice, form.price_overridden, loadingBom, bomLines.length]);
 
+  function friendly(msg: string): string {
+    return msg.includes("products_code_unique") ? t("codeExists") : msg;
+  }
+
   function set(key: keyof FormState) {
     return (
       e: React.ChangeEvent<
@@ -247,6 +253,7 @@ export function ProductForm({
         : (pricingOverride ?? rollupResult.calcPrice);
     return {
       sku: form.sku.trim() || null,
+      code: form.code.trim() || null,
       name_en: form.name_en.trim(),
       name_ar: form.name_ar.trim() || null,
       subcategory: form.subcategory,
@@ -289,7 +296,7 @@ export function ProductForm({
         .from("products")
         .update(buildPayload())
         .eq("id", product.id);
-      if (err) { setSaving(false); setError(err.message); return; }
+      if (err) { setSaving(false); setError(friendly(err.message)); return; }
       const bomErr = await saveBomLines(product.id);
       if (bomErr) { setSaving(false); setError(bomErr); return; }
     } else {
@@ -298,7 +305,7 @@ export function ProductForm({
         .insert({ ...buildPayload(), item_kind: "product" })
         .select("id")
         .single();
-      if (err || !inserted) { setSaving(false); setError(err?.message ?? "Insert failed"); return; }
+      if (err || !inserted) { setSaving(false); setError(friendly(err?.message ?? "Insert failed")); return; }
       const bomErr = await saveBomLines(inserted.id);
       if (bomErr) { setSaving(false); setError(bomErr); return; }
     }
@@ -350,6 +357,7 @@ export function ProductForm({
         ...buildPayload(),
         name_en: form.name_en.trim() + " (copy)",
         sku: null,
+        code: null,
         item_kind: "product",
         is_template: true,
       })
@@ -358,7 +366,7 @@ export function ProductForm({
 
     if (err1 || !newProd) {
       setDuplicating(false);
-      setError(err1?.message ?? "Duplicate failed");
+      setError(friendly(err1?.message ?? "Duplicate failed"));
       return;
     }
 
@@ -395,7 +403,11 @@ export function ProductForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">{t("code")}</label>
+              <input className="input font-mono" dir="ltr" value={form.code} onChange={set("code")} title={t("codeHint")} />
+            </div>
             <div>
               <label className="block text-sm font-medium mb-1">{t("sku")}</label>
               <input className="input" dir="ltr" value={form.sku} onChange={set("sku")} />
