@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase-server";
-import { FileText, Receipt, Boxes, FolderKanban } from "lucide-react";
 import { DashboardStats } from "./stats";
 
 export default async function DashboardPage() {

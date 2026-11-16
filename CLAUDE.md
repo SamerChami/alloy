@@ -55,7 +55,7 @@ completed (or cancelled).
 
 ## Verifying work
 - `npm run dev` to run locally (http://localhost:3000).
-- `npm run build` MUST pass before any change is considered done.
+- `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` MUST all pass before any change is considered done.
 - `.env.local` holds Supabase keys (gitignored). Never commit secrets.
 
 ## Git

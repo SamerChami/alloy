@@ -14,7 +14,7 @@ import {
 } from "@/lib/pricing";
 import type { TKey } from "@/lib/i18n";
 import dynamic from "next/dynamic";
-import { BomSection, newBomKey, emptyPanelLine, emptyComponentLine } from "./BomSection";
+import { BomSection, newBomKey } from "./BomSection";
 import type { BomLineState, PanelOption, ComponentOption, BandingType, Cut } from "./bom_types";
 import type { Product } from "./types";
 import type { RawPanel3D } from "@/lib/cabinet3d";
