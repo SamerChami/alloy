@@ -48,6 +48,7 @@ export function LinesTable({
   const { t, lang } = useLang();
   const [typed, setTyped] = useState<Record<string, Typed>>({});
   const [edit, setEdit] = useState<Edit | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const groups = groupBySection(lines);
   const names = sectionNames(lines);
@@ -110,7 +111,7 @@ export function LinesTable({
           <option key={s} value={s} />
         ))}
       </datalist>
-      <table className="w-full min-w-[900px] text-sm">
+      <table className="w-full min-w-[980px] text-sm">
         <thead>
           <tr className="border-b border-line bg-mist">
             <th className={th}>#</th>
@@ -141,10 +142,10 @@ export function LinesTable({
                 return (
                   <tr key={l.id} className="border-b border-line align-top">
                     <td className="px-3 py-2 text-slate tabular-nums" dir="ltr">{running}</td>
-                    <td className="px-3 py-2" dir="ltr">
+                    <td className="px-3 py-2 whitespace-nowrap" dir="ltr">
                       {editing && manual ? (
                         <input
-                          className="input w-28"
+                          className="input w-32 min-w-[8rem]"
                           dir="ltr"
                           value={edit.code}
                           onChange={(e) => setEdit({ ...edit, code: e.target.value })}
@@ -153,7 +154,7 @@ export function LinesTable({
                         l.code ?? ""
                       )}
                     </td>
-                    <td className="px-3 py-2 min-w-[14rem]">
+                    <td className={`px-3 py-2 ${editing ? "min-w-[20rem]" : "min-w-[14rem]"}`}>
                       {editing ? (
                         <div className="space-y-2">
                           <input
@@ -200,7 +201,7 @@ export function LinesTable({
                           ).map(([k, v]) => (
                             <input
                               key={k}
-                              className="input w-16"
+                              className="input w-20 min-w-[5rem] px-2"
                               type="number"
                               min="0"
                               step="1"
@@ -217,7 +218,7 @@ export function LinesTable({
                     <td className="px-3 py-2 tabular-nums whitespace-nowrap" dir="ltr">
                       {draft ? (
                         <input
-                          className="input w-24 px-2 tabular-nums"
+                          className="input w-24 min-w-[6rem] px-2 tabular-nums"
                           type="number"
                           min="0.01"
                           step="0.01"
@@ -234,7 +235,7 @@ export function LinesTable({
                     <td className="px-3 py-2 tabular-nums whitespace-nowrap" dir="ltr">
                       {draft ? (
                         <input
-                          className="input w-32 px-2 tabular-nums"
+                          className="input w-32 min-w-[8rem] px-2 tabular-nums"
                           type="number"
                           min="0"
                           step="0.001"
@@ -272,15 +273,35 @@ export function LinesTable({
                             <button className="btn-ghost p-2" onClick={() => startEdit(l)} aria-label={t("quoteEditLine")} title={t("quoteEditLine")}>
                               <Pencil size={15} />
                             </button>
-                            <button
-                              className="btn-ghost p-2 text-rust"
-                              disabled={busy}
-                              onClick={() => onRemove(l.id)}
-                              aria-label={t("removeLine")}
-                              title={t("removeLine")}
-                            >
-                              <Trash2 size={15} />
-                            </button>
+                            {confirmId === l.id ? (
+                              <div className="flex items-center gap-1 text-rust text-xs">
+                                <span>{t("quoteRemoveConfirm")}</span>
+                                <button
+                                  className="btn-ghost p-2 text-rust"
+                                  disabled={busy}
+                                  onClick={async () => {
+                                    await onRemove(l.id);
+                                    setConfirmId(null);
+                                  }}
+                                  aria-label={t("removeLine")}
+                                >
+                                  <Check size={15} />
+                                </button>
+                                <button className="btn-ghost p-2" onClick={() => setConfirmId(null)} aria-label={t("cancel")}>
+                                  <X size={15} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                className="btn-ghost p-2 text-rust"
+                                disabled={busy}
+                                onClick={() => setConfirmId(l.id)}
+                                aria-label={t("removeLine")}
+                                title={t("removeLine")}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )}
                           </div>
                         )}
                       </td>

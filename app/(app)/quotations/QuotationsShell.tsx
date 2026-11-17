@@ -91,7 +91,7 @@ export function QuotationsShell({
 
       {filtered.length === 0 ? (
         <div className="card p-12 text-center text-slate">
-          <p>{t("noQuotations")}</p>
+          <p>{quotations.length > 0 ? t("noMatches") : t("noQuotations")}</p>
         </div>
       ) : (
         <div className="card overflow-hidden">

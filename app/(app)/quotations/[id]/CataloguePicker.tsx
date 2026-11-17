@@ -104,7 +104,7 @@ export function CataloguePicker({
     }
     await onAdded();
     setAdded(true);
-    setTimeout(() => setAdded(false), 2000);
+    setTimeout(() => setAdded(false), 3000);
   }
 
   return (
@@ -141,7 +141,7 @@ export function CataloguePicker({
             </div>
           </div>
 
-          <div className="border border-line rounded-lg max-h-64 overflow-y-auto divide-y divide-line">
+          <div className="border border-line rounded-lg max-h-96 overflow-y-auto divide-y divide-line">
             {matches.map((p) => (
               <button
                 key={p.id}
@@ -151,12 +151,12 @@ export function CataloguePicker({
                   chosen?.id === p.id ? "bg-mist" : ""
                 }`}
               >
-                <span className="w-28 shrink-0 font-medium" dir="ltr">{p.code ?? ""}</span>
-                <span className="flex-1">{nameOf(p)}</span>
-                <span className="text-xs text-slate" dir="ltr">
+                <span className="w-28 shrink-0 font-medium whitespace-nowrap" dir="ltr">{p.code ?? ""}</span>
+                <span className="flex-1 min-w-0 truncate" title={nameOf(p)}>{nameOf(p)}</span>
+                <span className="text-xs text-slate shrink-0" dir="ltr">
                   {dimsLabel(p.width_mm, p.height_mm, p.depth_mm)}
                 </span>
-                <span className="text-end tabular-nums" dir="ltr">
+                <span className="text-end tabular-nums shrink-0" dir="ltr">
                   {jod(p.unit_price_jod)}
                   {Number(p.unit_price_jod ?? 0) === 0 && (
                     <span className="block text-rust text-xs">{t("quotePriceZero")}</span>

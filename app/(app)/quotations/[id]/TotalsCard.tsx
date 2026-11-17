@@ -77,6 +77,8 @@ export function TotalsCard({
           total: Number(quotation.total_jod),
         };
   const cost = costSummary(lines);
+  const noCost = cost.revenue === 0 && cost.cost === 0;
+  const marginPct = cost.revenue > 0 ? ((cost.margin / cost.revenue) * 100).toFixed(1) : null;
 
   return (
     <div className="card p-5 w-full max-w-sm ms-auto space-y-3">
@@ -86,10 +88,11 @@ export function TotalsCard({
           <dd className="tabular-nums" dir="ltr">{jod(shown.subtotal)}</dd>
         </div>
 
+        {draft && (
         <div className="flex justify-between items-center gap-3">
           <dt className="text-slate">{t("quoteDiscount")}</dt>
           <dd className="flex items-center gap-2">
-            {draft ? (
+            {(
               <>
                 <select
                   className="input w-20 py-1"
@@ -119,19 +122,21 @@ export function TotalsCard({
                   onBlur={() => saveDiscount()}
                 />
               </>
-            ) : (
-              <span className="text-slate text-xs" dir="ltr">
-                {quotation.discount_kind === "percent"
-                  ? `${Number(quotation.discount_value)} %`
-                  : jod(quotation.discount_value)}
-              </span>
             )}
           </dd>
         </div>
-        <div className="flex justify-between gap-3">
-          <dt className="text-slate">{t("quoteDiscount")}</dt>
-          <dd className="tabular-nums" dir="ltr">− {jod(shown.discount)}</dd>
-        </div>
+        )}
+        {(draft || shown.discount !== 0) && (
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate">
+              {t("quoteDiscount")}
+              {!draft && quotation.discount_kind === "percent" && (
+                <span dir="ltr"> ({Number(quotation.discount_value)} %)</span>
+              )}
+            </dt>
+            <dd className="tabular-nums" dir="ltr">− {jod(shown.discount)}</dd>
+          </div>
+        )}
         {draft &&
           !dirty &&
           quotation.discount_kind === "amount" &&
@@ -194,11 +199,14 @@ export function TotalsCard({
         <p className="font-semibold">{t("quoteInternal")}</p>
         <div className="flex justify-between">
           <span>{t("quoteCost")}</span>
-          <span className="tabular-nums" dir="ltr">{jod(cost.cost)}</span>
+          <span className="tabular-nums" dir="ltr">{noCost ? "—" : jod(cost.cost)}</span>
         </div>
         <div className="flex justify-between">
           <span>{t("quoteMargin")}</span>
-          <span className="tabular-nums" dir="ltr">{jod(cost.margin)}</span>
+          <span className={`tabular-nums ${!noCost && cost.margin < 0 ? "text-rust" : ""}`} dir="ltr">
+            {noCost ? "—" : jod(cost.margin)}
+            {!noCost && marginPct !== null && ` (${marginPct} %)`}
+          </span>
         </div>
         {cost.unknownLines > 0 && (
           <p className="text-slate">

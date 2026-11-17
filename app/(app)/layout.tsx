@@ -30,7 +30,7 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen">
       <Sidebar role={profile.role as Role} name={profile.full_name} />
-      <main className="flex-1 p-8 max-w-6xl">{children}</main>
+      <main className="flex-1 min-w-0 p-8 max-w-6xl">{children}</main>
     </div>
   );
 }
