@@ -160,6 +160,11 @@ export const dict = {
     // 3D preview
     preview3d: "3D Preview",
     resetView: "Reset view",
+    navSelect: "Select (Space)",
+    navOrbit: "Orbit (O) — or drag with the mouse wheel button",
+    navPan: "Pan (H) — or Shift + wheel-button drag",
+    navZoom: "Zoom (Z) — or roll the wheel",
+    navZoomExtents: "Zoom Extents (Shift+Z)",
     explode: "Explode",
     showDoors: "Show doors",
     showCuts: "Show cuts",
@@ -429,6 +434,11 @@ export const dict = {
     // 3D preview
     preview3d: "معاينة ثلاثية الأبعاد",
     resetView: "إعادة الضبط",
+    navSelect: "تحديد (Space)",
+    navOrbit: "تدوير (O) — أو اسحب بزر عجلة الفأرة",
+    navPan: "تحريك (H) — أو Shift مع سحب زر العجلة",
+    navZoom: "تكبير (Z) — أو أدر العجلة",
+    navZoomExtents: "إظهار الكل (Shift+Z)",
     explode: "فصل القطع",
     showDoors: "إظهار الأبواب",
     showCuts: "إظهار التجاويف",

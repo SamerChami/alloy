@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
-import { Maximize2, X } from "lucide-react";
+import { Maximize2, X, MousePointer2, Rotate3d, Hand, ZoomIn, Expand } from "lucide-react";
 import { buildCabinetBoxes, buildBoxesFromRawPanels, buildBoxesFromSkuPanels } from "@/lib/cabinet3d";
 import { useLang } from "@/components/lang-provider";
 import type { PartRole, RawPanel3D, SkuPanel3D } from "@/lib/cabinet3d";
@@ -27,6 +27,13 @@ type Props = {
 };
 
 type ViewMode = "shaded" | "wireframe";
+type NavTool = "select" | "orbit" | "pan" | "zoom";
+const TOOL_CURSOR: Record<NavTool, string> = {
+  select: "cursor-default",
+  orbit:  "cursor-grab",
+  pan:    "cursor-move",
+  zoom:   "cursor-zoom-in",
+};
 
 const ROLE_COLOR: Record<PartRole, number> = {
   side_left:     0xCECBC5,
@@ -78,6 +85,8 @@ export function Cabinet3D({
   const [explode,   setExplode]   = useState(false);
   const [viewMode,  setViewMode]  = useState<ViewMode>("shaded");
   const [modalOpen, setModalOpen] = useState(false);
+  const [tool, setTool] = useState<NavTool>("select");
+  const pointerOverRef = useRef(false);
 
   // Esc key + body-scroll lock while modal is open
   useEffect(() => {
@@ -107,6 +116,39 @@ export function Cabinet3D({
     cam.lookAt(cx, cy, cz);
   }, []);
 
+  // Frame everything: pivot = box centre, keep theta / phi
+  const zoomExtents = useCallback(() => {
+    const cam = cameraRef.current;
+    if (!cam) return;
+    const o   = orbitRef.current;
+    const box = new THREE.Box3();
+    if (groupRef.current) box.setFromObject(groupRef.current);
+    if (box.isEmpty()) {
+      const cW = cabinetWidth  > 0 ? cabinetWidth  : 800;
+      const cH = cabinetHeight > 0 ? cabinetHeight : 720;
+      const cD = cabinetDepth  > 0 ? cabinetDepth  : 580;
+      box.set(
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(cW / 1000, cH / 1000, cD / 1000),
+      );
+    }
+    const centre = box.getCenter(new THREE.Vector3());
+    const sphereR = box.getSize(new THREE.Vector3()).length() / 2;
+    let fov = THREE.MathUtils.degToRad(cam.fov);
+    if (cam.aspect < 1) fov = 2 * Math.atan(Math.tan(fov / 2) * cam.aspect); // narrower than tall → horizontal fov
+    o.cx = centre.x;
+    o.cy = centre.y;
+    o.cz = centre.z;
+    o.radius = (sphereR / Math.sin(fov / 2)) * 1.15;
+    updateCamera();
+  }, [cabinetWidth, cabinetHeight, cabinetDepth, updateCamera]);
+
+  // Frame the camera only when the MODEL changes, never on display toggles
+  const needsFrameRef = useRef(true);
+  useEffect(() => {
+    needsFrameRef.current = true;
+  }, [cabinetWidth, cabinetHeight, cabinetDepth, skuPanels, rawPanels, meshes]);
+
   // ── mount: scene, renderer, lights, animation loop, native listeners ──
   useEffect(() => {
     const container = containerRef.current;
@@ -125,7 +167,11 @@ export function Cabinet3D({
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(W, H);
-    renderer.shadowMap.enabled = true;
+    // Cast shadows are OFF (Stage 19b, Samer 17 Nov 2026): the shadow map striped thin
+    // parts (channel profiles, drawer boxes) and, once faces were drawn on both sides,
+    // large panels too. SketchUp also shows no shadows by default. Faces are still
+    // shaded by the lights; only cast shadows are gone. Set true to bring them back.
+    renderer.shadowMap.enabled = false;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
@@ -164,14 +210,41 @@ export function Cabinet3D({
     ro.observe(container);
 
     // Non-passive wheel so preventDefault() actually fires (React makes onWheel passive)
+    // Zooms towards the point under the cursor (SketchUp behaviour)
     function onWheel(e: WheelEvent) {
       e.preventDefault();
       e.stopPropagation();
       const o = orbitRef.current;
-      o.radius = Math.max(0.1, Math.min(20, o.radius + e.deltaY * 0.0008));
+      const newRadius = Math.max(0.02, Math.min(50, o.radius * Math.exp(e.deltaY * 0.001)));
+      const f = newRadius / o.radius;
+      const rect = (container as HTMLDivElement).getBoundingClientRect();
+      if (rect.width && rect.height) {
+        const ndc = new THREE.Vector2(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -(((e.clientY - rect.top) / rect.height) * 2 - 1),
+        );
+        camera.updateMatrixWorld();
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera(ndc, camera);
+        const pivot = new THREE.Vector3(o.cx, o.cy, o.cz);
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+          camera.getWorldDirection(new THREE.Vector3()), pivot,
+        );
+        const p = ray.ray.intersectPlane(plane, new THREE.Vector3());
+        if (p) {
+          o.cx += (p.x - o.cx) * (1 - f);
+          o.cy += (p.y - o.cy) * (1 - f);
+          o.cz += (p.z - o.cz) * (1 - f);
+        }
+      }
+      o.radius = newRadius;
       updateCamera();
     }
     container.addEventListener("wheel", onWheel, { passive: false });
+
+    // Stop the browser's middle-click auto-scroll (middle button orbits)
+    function onMouseDown(e: MouseEvent) { if (e.button === 1) e.preventDefault(); }
+    container.addEventListener("mousedown", onMouseDown);
 
     // Suppress context menu so right-drag rotates without the browser popup
     function onContextMenu(e: Event) { e.preventDefault(); }
@@ -181,6 +254,7 @@ export function Cabinet3D({
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
       container.removeEventListener("wheel", onWheel);
+      container.removeEventListener("mousedown", onMouseDown);
       container.removeEventListener("contextmenu", onContextMenu);
       disposeGroup(group);
       renderer.dispose();
@@ -476,7 +550,7 @@ export function Cabinet3D({
               }
             }
           } else {
-            const mat  = new THREE.MeshStandardMaterial({ color: ROLE_COLOR[box.role] ?? 0xD9D5CE, roughness: 0.8, metalness: 0.02 });
+            const mat  = new THREE.MeshStandardMaterial({ color: ROLE_COLOR[box.role] ?? 0xD9D5CE, roughness: 0.8, metalness: 0.02, side: THREE.DoubleSide, shadowSide: THREE.BackSide });
             const mesh = new THREE.Mesh(extGeo, mat);
             mesh.matrixAutoUpdate = false;
             rm.setPosition(box.x, box.y, box.z);
@@ -495,6 +569,8 @@ export function Cabinet3D({
                 const discGeo = new THREE.CylinderGeometry(pr, pr, pd, 48);
                 discGeo.rotateX(Math.PI / 2);
                 const discMat = (mat as THREE.MeshStandardMaterial).clone();
+                discMat.side = THREE.FrontSide; // discs stay single-sided (z-fighting)
+                discMat.shadowSide = null;      // three.js default for a one-sided material
                 const disc = new THREE.Mesh(discGeo, discMat);
                 const ptSign = (ti.face === "inner" ? szSign : -szSign);
                 const pFaceZ = ptSign * (thickness / 2 - pd / 2);
@@ -567,6 +643,8 @@ export function Cabinet3D({
             metalness:   0.02,
             transparent: isDoor,
             opacity:     isDoor ? 0.88 : 1.0,
+            side:        THREE.DoubleSide,
+            shadowSide:  THREE.BackSide,
           });
           const mesh = new THREE.Mesh(geo, mat);
           if (box.orient) {
@@ -597,20 +675,22 @@ export function Cabinet3D({
         }
       }
 
-      const o    = orbitRef.current;
-      o.cx       = cW / 1000 / 2;
-      o.cy       = cH / 1000 / 2;
-      o.cz       = cD / 1000 / 2;
-      o.phi      = Math.PI * 0.4;
-      o.radius   = Math.max(cW, cH, cD) / 1000 * 2.0;
-      updateCamera();
+      if (needsFrameRef.current) {
+        needsFrameRef.current = false;
+        const o = orbitRef.current;
+        o.theta = Math.PI * 1.75;
+        o.phi   = Math.PI * 0.4;
+        zoomExtents();
+      } else {
+        updateCamera();
+      }
     }, 150);
 
     return () => clearTimeout(tid);
-  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, skuPanels, rawPanels, meshes, showDoors, showCuts, explode, viewMode, updateCamera]);
+  }, [cabinetWidth, cabinetHeight, cabinetDepth, parts, skuPanels, rawPanels, meshes, showDoors, showCuts, explode, viewMode, updateCamera, zoomExtents]);
 
   // ── pointer handlers ──────────────────────────────────────────────────
-  // Left (0) → PAN    Middle (1) / Right (2) → ORBIT
+  // SketchUp mouse: middle = orbit (Shift = pan); left = active tool; right = nothing
 
   function onPointerDown(e: React.PointerEvent) {
     (e.target as Element).setPointerCapture(e.pointerId);
@@ -625,24 +705,36 @@ export function Cabinet3D({
     drag.lastX = e.clientX;
     drag.lastY = e.clientY;
 
-    if (drag.button === 0) {
-      // Left drag → PAN along camera right/up
+    // Decide the action on every move (Shift can change mid-drag, like SketchUp)
+    let action: "orbit" | "pan" | "zoom" | "none" = "none";
+    if (drag.button === 1) action = e.shiftKey ? "pan" : "orbit";
+    else if (drag.button === 0) {
+      if (tool === "orbit") action = e.shiftKey ? "pan" : "orbit";
+      else if (tool === "pan") action = "pan";
+      else if (tool === "zoom") action = "zoom";
+    }
+    if (action === "none") return;
+
+    const o = orbitRef.current;
+    if (action === "pan") {
+      // Model follows the cursor 1:1 (world units per pixel at the pivot distance)
       const cam = cameraRef.current;
-      const o   = orbitRef.current;
-      if (!cam) return;
+      const h   = containerRef.current?.clientHeight ?? 0;
+      if (!cam || !h) return;
       cam.updateMatrixWorld();
       const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
       const up    = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
-      const spd   = o.radius * 0.0015;
+      const spd   = (2 * o.radius * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2)) / h;
       o.cx += (-right.x * dx + up.x * dy) * spd;
       o.cy += (-right.y * dx + up.y * dy) * spd;
       o.cz += (-right.z * dx + up.z * dy) * spd;
-    } else {
-      // Middle / right drag → ORBIT
-      const o = orbitRef.current;
+    } else if (action === "orbit") {
       o.theta -= dx * 0.008;
-      // -dy: dragging UP decreases phi → camera moves higher → looks more from above (natural)
+      // dragging down looks from above, as in SketchUp
       o.phi = Math.max(0.08, Math.min(Math.PI - 0.08, o.phi - dy * 0.008));
+    } else {
+      // Zoom tool: drag up zooms in, drag down zooms out
+      o.radius = Math.max(0.02, Math.min(50, o.radius * Math.exp(dy * 0.005)));
     }
     updateCamera();
   }
@@ -652,24 +744,58 @@ export function Cabinet3D({
     dragRef.current.active = false;
   }
 
+  // Reset = opening camera angles + extents
   function resetView() {
-    const o  = orbitRef.current;
-    const cW = cabinetWidth  > 0 ? cabinetWidth  : 800;
-    const cH = cabinetHeight > 0 ? cabinetHeight : 720;
-    const cD = cabinetDepth  > 0 ? cabinetDepth  : 580;
-    o.cx     = cW / 1000 / 2;
-    o.cy     = cH / 1000 / 2;
-    o.cz     = cD / 1000 / 2;
-    o.theta  = Math.PI * 0.75;
-    o.phi    = Math.PI * 0.4;
-    o.radius = Math.max(cW, cH, cD) / 1000 * 2.0;
-    updateCamera();
+    const o = orbitRef.current;
+    o.theta = Math.PI * 1.75;
+    o.phi   = Math.PI * 0.4;
+    setTool("select");
+    zoomExtents();
   }
+
+  // SketchUp keys, only while the pointer is over this viewer
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!pointerOverRef.current) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && e.shiftKey) zoomExtents();
+      else if (k === "z") setTool("zoom");
+      else if (k === "o") setTool("orbit");
+      else if (k === "h") setTool("pan");
+      else if (e.key === " ") setTool("select");
+      else return;
+      e.preventDefault();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [zoomExtents]);
+
+  const toolBtn = (id: NavTool, Icon: typeof Hand, label: string) => (
+    <button
+      type="button"
+      className={`btn-ghost py-1 px-2${tool === id ? " text-brass" : ""}`}
+      title={label}
+      onClick={() => setTool(id)}
+    >
+      <Icon size={14} />
+    </button>
+  );
 
   // ── shared toolbar JSX ────────────────────────────────────────────────
   const toolbar = (
     <div className="bg-mist px-4 py-2 flex items-center gap-2 border-b border-line flex-wrap shrink-0">
       <span className="text-sm font-semibold flex-1">{t("preview3d")}</span>
+      {toolBtn("select", MousePointer2, t("navSelect"))}
+      {toolBtn("orbit", Rotate3d, t("navOrbit"))}
+      {toolBtn("pan", Hand, t("navPan"))}
+      {toolBtn("zoom", ZoomIn, t("navZoom"))}
+      <button type="button" className="btn-ghost py-1 px-2" title={t("navZoomExtents")} onClick={zoomExtents}>
+        <Expand size={14} />
+      </button>
+      <span className="w-px h-4 bg-line mx-1" />
       <button type="button" className="btn-ghost text-xs py-1 px-2" onClick={resetView}>
         {t("resetView")}
       </button>
@@ -734,7 +860,9 @@ export function Cabinet3D({
     <div
       ref={containerRef}
       style={inModal ? undefined : { height: 400 }}
-      className={`w-full select-none cursor-grab active:cursor-grabbing${inModal ? " flex-1 min-h-0" : ""}`}
+      className={`w-full select-none ${TOOL_CURSOR[tool]}${inModal ? " flex-1 min-h-0" : ""}`}
+      onPointerEnter={() => { pointerOverRef.current = true; }}
+      onPointerLeave={() => { pointerOverRef.current = false; }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -903,7 +1031,7 @@ function addPartToGroup(
     g.add(seg);
     geo.dispose();
   } else {
-    const mat  = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.25 });
+    const mat  = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.25, side: THREE.DoubleSide, shadowSide: THREE.BackSide });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, y, z);
     mesh.castShadow    = true;
