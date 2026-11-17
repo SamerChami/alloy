@@ -11,11 +11,14 @@ import {
   Mail,
   MapPin,
   ExternalLink,
+  Plus,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase-browser";
 import { useLang } from "@/components/lang-provider";
 import { jod } from "@/lib/utils";
 import type { TKey } from "@/lib/i18n";
+import type { QuoteStatus } from "@/lib/quotations";
+import { StatusBadge } from "../../quotations/StatusBadge";
 import { ClientForm } from "../ClientForm";
 import type { Client } from "../types";
 
@@ -51,7 +54,16 @@ function InfoRow({ label, value, ltr }: { label: string; value: string; ltr?: bo
   );
 }
 
-export function ClientDetail({ client }: { client: Client }) {
+export type ClientQuotation = {
+  id: string;
+  code: string;
+  title: string | null;
+  status: QuoteStatus;
+  issue_date: string;
+  total_jod: number;
+};
+
+export function ClientDetail({ client, quotations }: { client: Client; quotations: ClientQuotation[] }) {
   const { t } = useLang();
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
@@ -229,7 +241,7 @@ export function ClientDetail({ client }: { client: Client }) {
         </div>
       )}
 
-      {/* Row 2: Drive Folder + Projects & Quotations placeholder */}
+      {/* Row 2: Drive Folder */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Drive Folder */}
         <div className="card p-5">
@@ -248,12 +260,34 @@ export function ClientDetail({ client }: { client: Client }) {
             <p className="text-sm text-slate">{t("noFolderLinked")}</p>
           )}
         </div>
+      </div>
 
-        {/* Projects & Quotations placeholder */}
-        <div className="card p-5">
-          <SectionTitle>{t("projectsQuotations")}</SectionTitle>
-          <p className="text-sm text-slate">{t("comingSoon")}</p>
+      {/* Quotations — full width */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h2 className="text-xs font-semibold text-slate uppercase tracking-wider">{t("quotations")}</h2>
+          <Link href={`/quotations?client=${client.id}`} className="btn-ghost inline-flex items-center gap-2 text-sm">
+            <Plus size={15} />
+            {t("newQuotation")}
+          </Link>
         </div>
+        {quotations.length === 0 ? (
+          <p className="text-sm text-slate">{t("noQuotations")}</p>
+        ) : (
+          <ul className="divide-y divide-line text-sm">
+            {quotations.map((q) => (
+              <li key={q.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2">
+                <Link href={`/quotations/${q.id}`} dir="ltr" className="font-medium hover:text-brass transition-colors">
+                  {q.code}
+                </Link>
+                <span className="flex-1 text-slate">{q.title ?? ""}</span>
+                <span className="text-slate" dir="ltr">{q.issue_date}</span>
+                <StatusBadge status={q.status} />
+                <span className="tabular-nums" dir="ltr">{jod(q.total_jod)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {formOpen && (

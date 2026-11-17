@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase-server";
-import { ClientDetail } from "./ClientDetail";
+import { ClientDetail, type ClientQuotation } from "./ClientDetail";
 import { ClientNotFound } from "./ClientNotFound";
 
 export default async function ClientDetailPage({
@@ -19,5 +19,12 @@ export default async function ClientDetailPage({
     .single();
 
   if (!client) return <ClientNotFound />;
-  return <ClientDetail client={client} />;
+
+  const { data: quotations } = await supabase
+    .from("quotations")
+    .select("id, code, title, status, issue_date, total_jod")
+    .eq("client_id", id)
+    .order("created_at", { ascending: false });
+
+  return <ClientDetail client={client} quotations={(quotations ?? []) as ClientQuotation[]} />;
 }
