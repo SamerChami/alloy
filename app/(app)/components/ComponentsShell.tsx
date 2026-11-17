@@ -3,13 +3,16 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Plus, Pencil, ExternalLink } from "lucide-react";
+import { createClient } from "@/lib/supabase-browser";
 import { useLang } from "@/components/lang-provider";
 import { PageTitle } from "@/components/ui/blocks";
 import { jod } from "@/lib/utils";
 import { componentSubcategories, type SubcategoryConfig } from "@/lib/catalog";
 import type { TKey } from "@/lib/i18n";
 import { ComponentForm } from "./ComponentForm";
+import { BandingTypesCard } from "./BandingTypesCard";
 import type { Component } from "./types";
+import type { BandingType } from "../products/bom_types";
 
 const OTHER: SubcategoryConfig = { value: "Other", en: "Other", ar: "أخرى" };
 const ALL_GROUPS = [...componentSubcategories, OTHER];
@@ -17,13 +20,30 @@ const ALL_GROUPS = [...componentSubcategories, OTHER];
 function ComponentRow({
   c,
   isOffice,
+  showInactive,
   onEdit,
 }: {
   c: Component;
   isOffice: boolean;
+  showInactive: boolean;
   onEdit: (c: Component) => void;
 }) {
   const { t } = useLang();
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleReactivate() {
+    setBusy(true);
+    setError(null);
+    const { error: err } = await createClient()
+      .from("products")
+      .update({ is_active: true })
+      .eq("id", c.id);
+    setBusy(false);
+    if (err) { setError(err.message); return; }
+    router.refresh();
+  }
   const isLow = c.track_stock && c.stock_qty <= c.reorder_level;
 
   return (
@@ -80,6 +100,7 @@ function ComponentRow({
       </td>
       {isOffice && (
         <td className="px-4 py-3">
+          <div className="flex items-center gap-1">
           <button
             className="btn-ghost p-2"
             onClick={() => onEdit(c)}
@@ -87,6 +108,17 @@ function ComponentRow({
           >
             <Pencil size={15} />
           </button>
+          {showInactive && (
+            <button
+              className="btn-ghost text-xs"
+              disabled={busy}
+              onClick={handleReactivate}
+            >
+              {t("reactivate")}
+            </button>
+          )}
+          {error && <p className="text-rust text-xs">{error}</p>}
+          </div>
         </td>
       )}
     </tr>
@@ -96,10 +128,12 @@ function ComponentRow({
 function ComponentTable({
   components,
   isOffice,
+  showInactive,
   onEdit,
 }: {
   components: Component[];
   isOffice: boolean;
+  showInactive: boolean;
   onEdit: (c: Component) => void;
 }) {
   const { t } = useLang();
@@ -122,7 +156,7 @@ function ComponentTable({
           </thead>
           <tbody>
             {components.map((c) => (
-              <ComponentRow key={c.id} c={c} isOffice={isOffice} onEdit={onEdit} />
+              <ComponentRow key={c.id} c={c} isOffice={isOffice} showInactive={showInactive} onEdit={onEdit} />
             ))}
           </tbody>
         </table>
@@ -134,9 +168,13 @@ function ComponentTable({
 export function ComponentsShell({
   initialComponents,
   isOffice,
+  showInactive,
+  bandingTypes,
 }: {
   initialComponents: Component[];
   isOffice: boolean;
+  showInactive: boolean;
+  bandingTypes: BandingType[];
 }) {
   const { t, lang } = useLang();
   const router = useRouter();
@@ -196,6 +234,8 @@ export function ComponentsShell({
     <div>
       <PageTitle titleKey="components" />
 
+      {isOffice && <BandingTypesCard bandingTypes={bandingTypes} />}
+
       {/* Toolbar */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
@@ -212,6 +252,14 @@ export function ComponentsShell({
         </div>
         {isOffice && (
           <button
+            className="btn-ghost"
+            onClick={() => router.push(showInactive ? "/components" : "/components?inactive=1")}
+          >
+            {t(showInactive ? "showActive" : "showDeactivated")}
+          </button>
+        )}
+        {isOffice && !showInactive && (
+          <button
             className="btn-primary flex items-center gap-2"
             onClick={openAdd}
           >
@@ -220,6 +268,10 @@ export function ComponentsShell({
           </button>
         )}
       </div>
+
+      {showInactive && (
+        <p className="text-sm text-slate mb-4">{t("deactivatedListNote")}</p>
+      )}
 
       {/* Subcategory filter pills */}
       <div className="flex flex-wrap gap-2 mb-6">
@@ -250,8 +302,8 @@ export function ComponentsShell({
 
       {filtered.length === 0 ? (
         <div className="card p-12 text-center text-slate">
-          <p>{t("noComponents")}</p>
-          {isOffice && (
+          <p>{t(showInactive ? "noDeactivated" : "noComponents")}</p>
+          {isOffice && !showInactive && (
             <button
               className="btn-primary mt-4 mx-auto flex items-center gap-2"
               onClick={openAdd}
@@ -271,13 +323,13 @@ export function ComponentsShell({
                 <h3 className="text-xs font-semibold text-slate uppercase tracking-wider mb-3">
                   {subLabel(sub)}
                 </h3>
-                <ComponentTable components={items} isOffice={isOffice} onEdit={openEdit} />
+                <ComponentTable components={items} isOffice={isOffice} showInactive={showInactive} onEdit={openEdit} />
               </div>
             );
           })}
         </div>
       ) : (
-        <ComponentTable components={filtered} isOffice={isOffice} onEdit={openEdit} />
+        <ComponentTable components={filtered} isOffice={isOffice} showInactive={showInactive} onEdit={openEdit} />
       )}
 
       {formOpen && (

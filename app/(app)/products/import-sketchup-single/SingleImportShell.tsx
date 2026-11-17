@@ -14,7 +14,7 @@ import {
   updateCatalogueEntry,
   addStandardSize,
 } from "@/lib/catalogImport";
-import type { ComponentRef } from "@/lib/fittings";
+import { classifyPart, type ComponentRef } from "@/lib/fittings";
 import type { SkuPanel3D } from "@/lib/cabinet3d";
 import {
   type V3Json,
@@ -127,13 +127,18 @@ export function SingleImportShell() {
     const root = parsed.roots[0];
     const meta = { source_filename: parsed.model, export_version: parsed.version ?? null };
     const fn = action === "update" ? updateCatalogueEntry : addStandardSize;
-    const err = await fn(createClient(), existingId, root, [...panels, ...fittings], components, meta);
+    const out = await fn(createClient(), existingId, root, [...panels, ...fittings], components, meta);
     setImporting(false);
-    if (err) { setImportError(err); return; }
+    if (out.error) { setImportError(out.error); return; }
     setImportResult({
       name: cabinetName.trim() || root.name,
       panels: priced.panelCount,
-      message: t(action === "update" ? "importUpdatedOk" : "importSizeAddedOk"),
+      message:
+        t(action === "update" ? "importUpdatedOk" : "importSizeAddedOk") +
+        " " +
+        t("importSavedCounts")
+          .replace("{panels}", String(out.panelLines))
+          .replace("{components}", String(out.componentLines)),
     });
   }
 
@@ -317,14 +322,20 @@ export function SingleImportShell() {
               </span>
             </div>
             {priced.unlinked.length > 0 && (
-              <p className="text-xs text-rust">
-                {t("fittingsNotLinked")}{" "}
-                <span dir="ltr">
-                  {priced.unlinked
-                    .map((u) => `${u.code} × ${u.qty} ${t(u.unit === "m" ? "unit_m" : "unit_pcs")}`)
-                    .join(", ")}
-                </span>
-              </p>
+              <div className="border border-rust/30 bg-rust/5 rounded-lg p-4 flex gap-3">
+                <AlertTriangle size={16} className="text-rust shrink-0 mt-0.5" />
+                <div className="space-y-2">
+                  <p className="text-sm text-rust font-medium">{t("fittingsNotLinkedTitle")}</p>
+                  <ul className="text-sm text-rust space-y-0.5" dir="ltr">
+                    {priced.unlinked.map((u, i) => (
+                      <li key={i} className="font-mono">
+                        {`${u.code} × ${u.qty} ${t(u.unit === "m" ? "unit_m" : "unit_pcs")}`}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-rust">{t("fittingsNotLinkedHow")}</p>
+                </div>
+              </div>
             )}
             <p className="text-xs text-slate">
               {t("importedFrom")}: <span className="font-mono" dir="ltr">{filename}</span>
@@ -374,11 +385,12 @@ export function SingleImportShell() {
                 <tbody>
                   {[...panels, ...fittings].map((part, i) => {
                     const { thickness, width, height } = cutListDims(part);
+                    const kind = classifyPart(part, components);
                     return (
                       <tr
                         key={i}
                         className={`border-b border-line last:border-0 hover:bg-mist/20 ${
-                          part.isFitting ? "opacity-60" : ""
+                          kind !== "panel" ? "opacity-60" : ""
                         }`}
                       >
                         <td className="px-3 py-1.5 font-mono">{part.name}</td>
@@ -386,12 +398,18 @@ export function SingleImportShell() {
                         <td className="px-3 py-1.5">
                           <span
                             className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                              part.isFitting
-                                ? "bg-mist text-slate"
-                                : "bg-brass/10 text-brass"
+                              kind === "unlinked"
+                                ? "bg-rust/10 text-rust"
+                                : kind === "linked"
+                                  ? "bg-mist text-slate"
+                                  : "bg-brass/10 text-brass"
                             }`}
                           >
-                            {part.isFitting ? t("skuFittingTag") : t("skuPanelTag")}
+                            {kind === "panel"
+                              ? t("skuPanelTag")
+                              : kind === "linked"
+                                ? t("skuFittingTag")
+                                : `${t("skuFittingTag")} — ${t("notLinkedShort")}`}
                           </span>
                         </td>
                         <td className="px-3 py-1.5 text-end tabular-nums">{Math.round(thickness)}</td>

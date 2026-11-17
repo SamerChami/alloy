@@ -12,7 +12,12 @@ const OFFICE_ROLES = [
   "analyzing_manager",
 ];
 
-export default async function ProductsPage() {
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ inactive?: string }>;
+}) {
+  const showInactive = (await searchParams).inactive === "1";
   const supabase = await createClient();
 
   const {
@@ -44,6 +49,7 @@ export default async function ProductsPage() {
       <ProductsShell
         initialProducts={(basic ?? []) as ProductBasic[]}
         isOffice={false}
+        showInactive={false}
         panels={[]}
         allComponents={[]}
         bandingTypes={[]}
@@ -65,7 +71,7 @@ export default async function ProductsPage() {
         "id, sku, code, default_panel_id, calc_price_jod, name_en, name_ar, subcategory, unit, unit_price_jod, cost_jod, width_mm, height_mm, depth_mm, description, drive_url, is_active, labor_jod, margin_pct, price_overridden, is_template, materials_cost_jod, components_cost_jod, base_cost_jod"
       )
       .eq("item_kind", "product")
-      .eq("is_active", true)
+      .eq("is_active", !showInactive)
       .order("subcategory")
       .order("name_en"),
     // Panels = components with sheet dimensions set (available after db/05_bom.sql)
@@ -87,7 +93,6 @@ export default async function ProductsPage() {
     supabase
       .from("banding_types")
       .select("id, name, price_per_m_jod, is_active")
-      .eq("is_active", true)
       .order("name"),
     supabase.from("pricing_settings").select("waste_pct, rounding_step_jod").single(),
   ]);
@@ -103,6 +108,7 @@ export default async function ProductsPage() {
     <ProductsShell
       initialProducts={(products ?? []) as Product[]}
       isOffice={true}
+      showInactive={showInactive}
       panels={(panels ?? []) as PanelOption[]}
       allComponents={(allComponents ?? []) as ComponentOption[]}
       bandingTypes={(bandingTypes ?? []) as BandingType[]}

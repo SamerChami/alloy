@@ -73,6 +73,7 @@ export function ComponentForm({
   const [form, setForm] = useState<FormState>(() => fromComponent(component));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -124,20 +125,24 @@ export function ComponentForm({
       sheet_price_jod: isMaterial && form.sheet_price_jod !== "" ? parseFloat(form.sheet_price_jod) : null,
     };
 
-    const friendly = (msg: string) =>
-      msg.includes("products_code_unique") ? t("codeExists") : msg;
+    // A duplicate code is shown under the Code input, not in the general error line.
+    const fail = (msg: string) => {
+      setSaving(false);
+      if (msg.includes("products_code_unique")) setCodeError(true);
+      else setError(msg);
+    };
 
     if (component?.id) {
       const { error: err } = await supabase
         .from("products")
         .update(payload)
         .eq("id", component.id);
-      if (err) { setSaving(false); setError(friendly(err.message)); return; }
+      if (err) { fail(err.message); return; }
     } else {
       const { error: err } = await supabase
         .from("products")
         .insert({ ...payload, item_kind: "component" });
-      if (err) { setSaving(false); setError(friendly(err.message)); return; }
+      if (err) { fail(err.message); return; }
     }
 
     setSaving(false);
@@ -210,7 +215,18 @@ export function ComponentForm({
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">{t("code")}</label>
-              <input className="input font-mono" dir="ltr" value={form.code} onChange={set("code")} title={t("componentCodeHint")} />
+              <input
+                className={`input font-mono ${codeError ? "!border-rust" : ""}`}
+                dir="ltr"
+                value={form.code}
+                onChange={(e) => { setCodeError(false); set("code")(e); }}
+                title={t("componentCodeHint")}
+              />
+              {codeError ? (
+                <p className="text-rust text-xs mt-1">{t("codeExists")}</p>
+              ) : (
+                <p className="text-xs text-slate mt-1">{t("componentCodeHint")}</p>
+              )}
             </div>
           </div>
 

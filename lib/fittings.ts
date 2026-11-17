@@ -65,6 +65,22 @@ export function partLengthMm(part: V3Part): number {
   return part.profile_mm?.run_mm ?? Math.max(...part.sorted);
 }
 
+/** The code of a drawn part, as used for linking: the code part of its name,
+ *  without the "#12" counter SketchUp adds to a copied / made-unique definition
+ *  ("Leg_100#3"). Empty string when the part has no usable name. */
+export function partCode(part: V3Part): string {
+  return (codeFromName(part.name) ?? "").replace(/#\d+$/, "").trim();
+}
+
+/** How one drawn part is priced (the three rules of splitForPricing). */
+export type PartPricing = "panel" | "linked" | "unlinked";
+
+export function classifyPart(part: V3Part, components: Map<string, ComponentRef>): PartPricing {
+  const code = partCode(part);
+  if (code !== "" && components.has(codeKey(code))) return "linked";
+  return part.isFitting ? "unlinked" : "panel";
+}
+
 function componentRow(
   partName: string | null, componentId: string | null, qty: number, sortOrder: number,
 ): ComponentBomRow {
@@ -99,9 +115,7 @@ export function splitForPricing(
   const groups = new Map<string, Group>();
 
   for (const part of parts) {
-    // SketchUp adds "#12" to a definition name when it is copied / made unique
-    // ("Leg_100#3"). That counter is never part of the code.
-    const code = (codeFromName(part.name) ?? "").replace(/#\d+$/, "").trim();
+    const code = partCode(part);
     const comp = code !== "" ? (components.get(codeKey(code)) ?? null) : null;
     if (!comp && !part.isFitting) {
       panels.push(part);

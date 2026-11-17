@@ -217,15 +217,15 @@ export function ProjectImportShell() {
         }
         const meta = { source_filename: parsed.model, export_version: parsed.version ?? null };
         const fn = row.action === "update" ? updateCatalogueEntry : addStandardSize;
-        const err = await fn(supabase, row.productId, root, parts, components, meta);
-        if (err) {
+        const out = await fn(supabase, row.productId, root, parts, components, meta);
+        if (out.error) {
           setImporting(false);
-          setImportError(err);
+          setImportError(out.error);
           return;
         }
         if (row.action === "update") updated++;
         else sizes++;
-        totalPanels += row.panelCount;
+        totalPanels += out.panelLines;
         importedCount++;
         continue;
       }

@@ -357,11 +357,14 @@ export function BomSection({
                           }
                         >
                           <option value="">{t("noneOption")}</option>
-                          {bandingTypes.map((b) => (
-                            <option key={b.id} value={b.id}>
-                              {b.name} ({b.price_per_m_jod.toFixed(3)}/m)
-                            </option>
-                          ))}
+                          {bandingTypes
+                            .filter((b) => b.is_active || b.id === line.banding_type_id)
+                            .map((b) => (
+                              <option key={b.id} value={b.id}>
+                                {b.name} ({b.price_per_m_jod.toFixed(3)}/m)
+                                {b.is_active ? "" : ` (${t("inactive")})`}
+                              </option>
+                            ))}
                         </select>
                       </div>
                       {line.banding_type_id && (

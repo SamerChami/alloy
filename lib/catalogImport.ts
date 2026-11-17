@@ -150,8 +150,16 @@ async function loadOldBaseLines(supabase: SupabaseClient, productId: string): Pr
   return (data ?? []) as OldLine[];
 }
 
-/** 1. Update catalogue entry: the model's reference geometry is replaced.
- *  Returns an error message, or null on success. */
+/** What an import into an existing catalogue entry did. `error` is null on
+ *  success; the two counts are the lines actually saved (component lines
+ *  include hardware added by hand that was kept). */
+export type ImportOutcome = { error: string | null; panelLines: number; componentLines: number };
+
+function failed(message: string): ImportOutcome {
+  return { error: message, panelLines: 0, componentLines: 0 };
+}
+
+/** 1. Update catalogue entry: the model's reference geometry is replaced. */
 export async function updateCatalogueEntry(
   supabase: SupabaseClient,
   productId: string,
@@ -159,10 +167,10 @@ export async function updateCatalogueEntry(
   parts: V3Part[],
   components: Map<string, ComponentRef>,
   meta: ImportMeta,
-): Promise<string | null> {
+): Promise<ImportOutcome> {
   try {
     const oldLines = await loadOldBaseLines(supabase, productId);
-    const { rows } = importBomRows(parts, components, oldLines);
+    const { rows, panelCount } = importBomRows(parts, components, oldLines);
     const dims = rootDims(root);
 
     const { error: e1 } = await supabase
@@ -175,21 +183,22 @@ export async function updateCatalogueEntry(
         export_version: meta.export_version,
       })
       .eq("id", productId);
-    if (e1) return e1.message;
+    if (e1) return failed(e1.message);
 
     const { error: e2 } = await supabase.rpc("replace_bom_lines", {
       p_product_id: productId,
       p_lines: rows,
     });
-    return e2 ? e2.message : null;
+    return e2
+      ? failed(e2.message)
+      : { error: null, panelLines: panelCount, componentLines: rows.length - panelCount };
   } catch (e) {
-    return e instanceof Error ? e.message : String(e);
+    return failed(e instanceof Error ? e.message : String(e));
   }
 }
 
 /** 2. Add as standard size. An existing size with the same W×H×D is reused
- *  (its price is not changed) and only its parts are replaced.
- *  Returns an error message, or null on success. */
+ *  (its price is not changed) and only its parts are replaced. */
 export async function addStandardSize(
   supabase: SupabaseClient,
   productId: string,
@@ -197,7 +206,7 @@ export async function addStandardSize(
   parts: V3Part[],
   components: Map<string, ComponentRef>,
   meta: ImportMeta,
-): Promise<string | null> {
+): Promise<ImportOutcome> {
   try {
     const dims = roundedDims(root);
     const label = descriptionFromName(root.name);
@@ -211,7 +220,7 @@ export async function addStandardSize(
       .eq("height_mm", dims.height_mm)
       .eq("depth_mm", dims.depth_mm)
       .maybeSingle();
-    if (e0) return e0.message;
+    if (e0) return failed(e0.message);
 
     if (existing) {
       sizeId = existing.id as string;
@@ -228,20 +237,22 @@ export async function addStandardSize(
         })
         .select("id")
         .single();
-      if (e1 || !created) return e1?.message ?? "Insert failed";
+      if (e1 || !created) return failed(e1?.message ?? "Insert failed");
       sizeId = created.id as string;
     }
 
     const oldLines = await loadOldBaseLines(supabase, productId);
-    const { rows } = importBomRows(parts, components, oldLines);
+    const { rows, panelCount } = importBomRows(parts, components, oldLines);
     const { error: e2 } = await supabase.rpc("replace_bom_lines", {
       p_product_id: productId,
       p_lines: rows,
       p_size_id: sizeId,
     });
-    return e2 ? e2.message : null;
+    return e2
+      ? failed(e2.message)
+      : { error: null, panelLines: panelCount, componentLines: rows.length - panelCount };
   } catch (e) {
-    return e instanceof Error ? e.message : String(e);
+    return failed(e instanceof Error ? e.message : String(e));
   }
 }
 

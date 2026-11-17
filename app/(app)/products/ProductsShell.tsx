@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Plus, Pencil, ExternalLink, FileUp, Box } from "lucide-react";
+import { createClient } from "@/lib/supabase-browser";
 import { useLang } from "@/components/lang-provider";
 import { PageTitle } from "@/components/ui/blocks";
 import { jod } from "@/lib/utils";
@@ -29,13 +30,30 @@ function dims(p: ListProduct): string | null {
 function ProductRow({
   p,
   isOffice,
+  showInactive,
   onEdit,
 }: {
   p: ListProduct;
   isOffice: boolean;
+  showInactive: boolean;
   onEdit: (p: ListProduct) => void;
 }) {
   const { t } = useLang();
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleReactivate() {
+    setBusy(true);
+    setError(null);
+    const { error: err } = await createClient()
+      .from("products")
+      .update({ is_active: true })
+      .eq("id", p.id);
+    setBusy(false);
+    if (err) { setError(err.message); return; }
+    router.refresh();
+  }
   const d = dims(p);
   return (
     <tr className="border-b border-line last:border-0 hover:bg-mist/50 transition-colors">
@@ -79,6 +97,7 @@ function ProductRow({
       </td>
       {isOffice && (
         <td className="px-4 py-3">
+          <div className="flex items-center gap-1">
           <button
             className="btn-ghost p-2"
             onClick={() => onEdit(p)}
@@ -86,6 +105,17 @@ function ProductRow({
           >
             <Pencil size={15} />
           </button>
+          {showInactive && (
+            <button
+              className="btn-ghost text-xs"
+              disabled={busy}
+              onClick={handleReactivate}
+            >
+              {t("reactivate")}
+            </button>
+          )}
+          {error && <p className="text-rust text-xs">{error}</p>}
+          </div>
         </td>
       )}
     </tr>
@@ -95,10 +125,12 @@ function ProductRow({
 function ProductTable({
   products,
   isOffice,
+  showInactive,
   onEdit,
 }: {
   products: ListProduct[];
   isOffice: boolean;
+  showInactive: boolean;
   onEdit: (p: ListProduct) => void;
 }) {
   const { t } = useLang();
@@ -122,7 +154,7 @@ function ProductTable({
           </thead>
           <tbody>
             {products.map((p) => (
-              <ProductRow key={p.id} p={p} isOffice={isOffice} onEdit={onEdit} />
+              <ProductRow key={p.id} p={p} isOffice={isOffice} showInactive={showInactive} onEdit={onEdit} />
             ))}
           </tbody>
         </table>
@@ -134,6 +166,7 @@ function ProductTable({
 export function ProductsShell({
   initialProducts,
   isOffice,
+  showInactive,
   panels,
   allComponents,
   bandingTypes,
@@ -141,6 +174,7 @@ export function ProductsShell({
 }: {
   initialProducts: ListProduct[];
   isOffice: boolean;
+  showInactive: boolean;
   panels: PanelOption[];
   allComponents: ComponentOption[];
   bandingTypes: BandingType[];
@@ -223,6 +257,14 @@ export function ProductsShell({
           />
         </div>
         {isOffice && (
+          <button
+            className="btn-ghost"
+            onClick={() => router.push(showInactive ? "/products" : "/products?inactive=1")}
+          >
+            {t(showInactive ? "showActive" : "showDeactivated")}
+          </button>
+        )}
+        {isOffice && !showInactive && (
           <>
             <button
               className="btn-ghost flex items-center gap-2"
@@ -256,6 +298,10 @@ export function ProductsShell({
         )}
       </div>
 
+      {showInactive && (
+        <p className="text-sm text-slate mb-4">{t("deactivatedListNote")}</p>
+      )}
+
       <div className="flex flex-wrap gap-2 mb-6">
         <button
           className={`px-3 py-1 rounded-full text-sm border transition-colors ${
@@ -284,8 +330,8 @@ export function ProductsShell({
 
       {filtered.length === 0 ? (
         <div className="card p-12 text-center text-slate">
-          <p>{t("noProducts")}</p>
-          {isOffice && (
+          <p>{t(showInactive ? "noDeactivated" : "noProducts")}</p>
+          {isOffice && !showInactive && (
             <button
               className="btn-primary mt-4 mx-auto flex items-center gap-2"
               onClick={openAdd}
@@ -308,6 +354,7 @@ export function ProductsShell({
                 <ProductTable
                   products={items}
                   isOffice={isOffice}
+                  showInactive={showInactive}
                   onEdit={openEdit}
                 />
               </div>
@@ -315,7 +362,7 @@ export function ProductsShell({
           })}
         </div>
       ) : (
-        <ProductTable products={filtered} isOffice={isOffice} onEdit={openEdit} />
+        <ProductTable products={filtered} isOffice={isOffice} showInactive={showInactive} onEdit={openEdit} />
       )}
 
       {formOpen && (

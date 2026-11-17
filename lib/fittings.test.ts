@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { componentMap, mergeOldComponentLines, partLengthMm, splitForPricing, type ComponentRef } from "./fittings";
+import { classifyPart, componentMap, mergeOldComponentLines, partCode, partLengthMm, splitForPricing, type ComponentRef } from "./fittings";
 import { importBomRows, type OldLine } from "./catalogImport";
 import { isFittingByName } from "./sketchup/fittingKeywords";
 import type { V3Part } from "./sketchup/parseV3";
@@ -106,6 +106,20 @@ describe("splitForPricing", () => {
   it("skips an item number in front of the code", () => {
     const { componentRows } = splitForPricing([part("7__Leg_100__rear")], catalogue);
     expect(componentRows[0]).toMatchObject({ component_id: "c-leg", qty: 1 });
+  });
+});
+
+describe("classifyPart", () => {
+  it("gives the same answer as splitForPricing, part by part", () => {
+    expect(classifyPart(part("Leg_100#3"), catalogue)).toBe("linked");
+    expect(classifyPart(part("TRASH-BIN-30__under sink"), catalogue)).toBe("linked");
+    expect(classifyPart(part("Leg_150"), catalogue)).toBe("unlinked");
+    expect(classifyPart(part("Door"), catalogue)).toBe("panel");
+    expect(classifyPart(part("(unnamed)"), catalogue)).toBe("panel");
+  });
+  it("partCode drops the SketchUp counter and the description", () => {
+    expect(partCode(part("03-09-04-0007__Leg_12cm#480"))).toBe("03-09-04-0007");
+    expect(partCode(part("Leg_15cm#7"))).toBe("Leg_15cm");
   });
 });
 

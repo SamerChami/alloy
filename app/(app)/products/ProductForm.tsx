@@ -151,6 +151,7 @@ export function ProductForm({
   const [saving, setSaving] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -250,8 +251,11 @@ export function ProductForm({
     }
   }, [rollupResult.calcPrice, form.price_overridden, loadingBom, bomLines.length]);
 
-  function friendly(msg: string): string {
-    return msg.includes("products_code_unique") ? t("codeExists") : msg;
+  // A duplicate code is shown under the Code input, not in the general error line.
+  function fail(msg: string) {
+    setSaving(false);
+    if (msg.includes("products_code_unique")) setCodeError(true);
+    else setError(msg);
   }
 
   function set(key: keyof FormState) {
@@ -313,7 +317,7 @@ export function ProductForm({
         .from("products")
         .update(buildPayload())
         .eq("id", product.id);
-      if (err) { setSaving(false); setError(friendly(err.message)); return; }
+      if (err) { fail(err.message); return; }
       const bomErr = await saveBomLines(product.id);
       if (bomErr) { setSaving(false); setError(bomErr); return; }
     } else {
@@ -322,7 +326,7 @@ export function ProductForm({
         .insert({ ...buildPayload(), item_kind: "product" })
         .select("id")
         .single();
-      if (err || !inserted) { setSaving(false); setError(friendly(err?.message ?? "Insert failed")); return; }
+      if (err || !inserted) { fail(err?.message ?? "Insert failed"); return; }
       const bomErr = await saveBomLines(inserted.id);
       if (bomErr) { setSaving(false); setError(bomErr); return; }
     }
@@ -383,7 +387,7 @@ export function ProductForm({
 
     if (err1 || !newProd) {
       setDuplicating(false);
-      setError(friendly(err1?.message ?? "Duplicate failed"));
+      setError(err1?.message ?? "Duplicate failed");
       return;
     }
 
@@ -423,7 +427,14 @@ export function ProductForm({
           <div className="grid grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">{t("code")}</label>
-              <input className="input font-mono" dir="ltr" value={form.code} onChange={set("code")} title={t("codeHint")} />
+              <input
+                className={`input font-mono ${codeError ? "!border-rust" : ""}`}
+                dir="ltr"
+                value={form.code}
+                onChange={(e) => { setCodeError(false); set("code")(e); }}
+                title={t("codeHint")}
+              />
+              {codeError && <p className="text-rust text-xs mt-1">{t("codeExists")}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">{t("sku")}</label>
