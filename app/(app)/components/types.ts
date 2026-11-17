@@ -1,6 +1,7 @@
 export type Component = {
   id: string;
   sku: string | null;
+  code: string | null;
   name_en: string;
   name_ar: string | null;
   subcategory: string | null;

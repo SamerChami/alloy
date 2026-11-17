@@ -436,6 +436,15 @@ export function BomSection({
                             </option>
                           ))}
                         </select>
+                        {line.part_name !== "" && (
+                          <div
+                            className={`text-xs mt-0.5 ${line.component_id === "" ? "text-rust" : "text-slate"}`}
+                            dir="ltr"
+                          >
+                            {t("fromSketchup")}: {line.part_name}
+                            {line.component_id === "" && <> — {t("notLinkedShort")}</>}
+                          </div>
+                        )}
                       </div>
                       <div className="w-20">
                         <label className="block text-xs text-slate mb-0.5">
@@ -444,8 +453,8 @@ export function BomSection({
                         <input
                           className="input text-sm"
                           type="number"
-                          min="1"
-                          step="1"
+                          min="0"
+                          step="any"
                           dir="ltr"
                           value={line.qty}
                           onChange={(e) =>

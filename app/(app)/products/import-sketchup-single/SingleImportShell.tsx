@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Upload, AlertTriangle, ChevronLeft, CheckCircle, Info } from "lucide-react";
@@ -9,10 +9,12 @@ import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
 import { codeFromName, codeKey } from "@/lib/productCode";
 import {
-  panelsToBomRows,
+  importBomRows,
+  loadComponentRefs,
   updateCatalogueEntry,
   addStandardSize,
 } from "@/lib/catalogImport";
+import type { ComponentRef } from "@/lib/fittings";
 import type { SkuPanel3D } from "@/lib/cabinet3d";
 import {
   type V3Json,
@@ -46,6 +48,7 @@ export function SingleImportShell() {
     { name: string; panels: number; message?: string } | null
   >(null);
   const [existingCodes, setExistingCodes] = useState<Map<string, string>>(new Map());
+  const [components, setComponents]   = useState<Map<string, ComponentRef>>(new Map());
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -77,10 +80,13 @@ export function SingleImportShell() {
         const { panels: ps, fittings: fs } = cabinetToParts(root);
 
         const { data: codeRows } = await createClient()
-          .from("products").select("id, code").not("code", "is", null);
+          .from("products").select("id, code")
+          .eq("item_kind", "product")
+          .not("code", "is", null);
         setExistingCodes(
           new Map((codeRows ?? []).map((r) => [codeKey(r.code as string), r.id as string])),
         );
+        setComponents(await loadComponentRefs(createClient()));
 
         setParsed(json);
         setFilename(file.name);
@@ -105,6 +111,11 @@ export function SingleImportShell() {
     if (f) handleFile(f);
   }
 
+  const priced = useMemo(
+    () => importBomRows([...panels, ...fittings], components),
+    [panels, fittings, components],
+  );
+
   const code = parsed ? codeFromName(parsed.roots[0].name) : null;
   const existingId = code != null ? (existingCodes.get(codeKey(code)) ?? null) : null;
   const codeTaken = existingId != null;
@@ -116,12 +127,12 @@ export function SingleImportShell() {
     const root = parsed.roots[0];
     const meta = { source_filename: parsed.model, export_version: parsed.version ?? null };
     const fn = action === "update" ? updateCatalogueEntry : addStandardSize;
-    const err = await fn(createClient(), existingId, root, panels, meta);
+    const err = await fn(createClient(), existingId, root, [...panels, ...fittings], components, meta);
     setImporting(false);
     if (err) { setImportError(err); return; }
     setImportResult({
       name: cabinetName.trim() || root.name,
-      panels: panels.length,
+      panels: priced.panelCount,
       message: t(action === "update" ? "importUpdatedOk" : "importSizeAddedOk"),
     });
   }
@@ -166,10 +177,10 @@ export function SingleImportShell() {
       return;
     }
 
-    if (panels.length > 0) {
+    if (priced.rows.length > 0) {
       const { error: e2 } = await supabase.rpc("replace_bom_lines", {
         p_product_id: prod.id,
-        p_lines: panelsToBomRows(panels),
+        p_lines: priced.rows,
       });
       if (e2) {
         await supabase.from("products").delete().eq("id", prod.id);
@@ -180,7 +191,7 @@ export function SingleImportShell() {
     }
 
     setImporting(false);
-    setImportResult({ name: cabinetName.trim() || root.name, panels: panels.length });
+    setImportResult({ name: cabinetName.trim() || root.name, panels: priced.panelCount });
   }
 
   // Build SkuPanel3D for ALL leaves (panels + fittings) for accurate 3D
@@ -298,13 +309,23 @@ export function SingleImportShell() {
             <div className="flex gap-4 text-sm">
               <span>
                 <span className="text-slate text-xs me-1">{t("detectedPanels")}:</span>
-                <strong>{panels.length}</strong>
+                <strong>{priced.panelCount}</strong>
               </span>
               <span>
                 <span className="text-slate text-xs me-1">{t("skuFittings")}:</span>
-                <strong className="text-slate">{fittings.length}</strong>
+                <strong className="text-slate">{priced.rows.length - priced.panelCount}</strong>
               </span>
             </div>
+            {priced.unlinked.length > 0 && (
+              <p className="text-xs text-rust">
+                {t("fittingsNotLinked")}{" "}
+                <span dir="ltr">
+                  {priced.unlinked
+                    .map((u) => `${u.code} × ${u.qty} ${t(u.unit === "m" ? "unit_m" : "unit_pcs")}`)
+                    .join(", ")}
+                </span>
+              </p>
+            )}
             <p className="text-xs text-slate">
               {t("importedFrom")}: <span className="font-mono" dir="ltr">{filename}</span>
             </p>

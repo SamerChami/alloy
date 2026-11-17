@@ -50,6 +50,10 @@ Schema lives in `db/01_schema.sql` (+ `02_rls.sql`, `03_seed.sql`). Read it
 before touching data. Main tables: profiles, clients, suppliers, products,
 projects, quotations(+items), contracts, invoices(+items, payments), tasks,
 stock_movements. Totals/stock/codes and product costs/prices are maintained by the database (triggers and the price_bom / reprice_product functions) — don't recompute or store them from app code. lib/pricing.ts is a preview that mirrors the database rules; change both together.
+Fittings: lib/sketchup/fittingKeywords.ts is the only fitting keyword list
+(kept identical to FITTING_KEYS in the SketchUp extension by a test). On
+import a drawn part is linked to a component by code (lib/fittings.ts);
+never add a second keyword list.
 
 ## Workflow stages (the projects.stage enum, in order)
 lead → design → client_review → production_prep → analyzing → panel_saw →

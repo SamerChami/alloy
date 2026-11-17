@@ -9,10 +9,12 @@ import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
 import { codeFromName, codeKey } from "@/lib/productCode";
 import {
-  panelsToBomRows,
+  importBomRows,
+  loadComponentRefs,
   updateCatalogueEntry,
   addStandardSize,
 } from "@/lib/catalogImport";
+import type { ComponentRef } from "@/lib/fittings";
 import type { SkuPanel3D } from "@/lib/cabinet3d";
 import {
   type V3Json,
@@ -36,6 +38,7 @@ type CabinetRow = {
   productId: string | null; // existing catalogue product, when status is in_catalogue
   panelCount: number;
   fittingCount: number;
+  unlinkedCount: number;
 };
 
 const AUTO_TICK = new Set(["Cabinet", "Other", "Part"]);
@@ -48,6 +51,7 @@ export function ProjectImportShell() {
   const [parseError, setParseError]   = useState<string | null>(null);
   const [parsed, setParsed]           = useState<V3Json | null>(null);
   const [rows, setRows]               = useState<CabinetRow[]>([]);
+  const [components, setComponents]   = useState<Map<string, ComponentRef>>(new Map());
   const [filename, setFilename]       = useState("");
   const [previewIdx, setPreviewIdx]   = useState(0);
   const [importing, setImporting]     = useState(false);
@@ -87,7 +91,10 @@ export function ProjectImportShell() {
         }
 
         const { data: codeRows } = await createClient()
-          .from("products").select("id, code").not("code", "is", null);
+          .from("products").select("id, code")
+          .eq("item_kind", "product")
+          .not("code", "is", null);
+        const components = await loadComponentRefs(createClient());
         const existing = new Map(
           (codeRows ?? []).map((r) => [codeKey(r.code as string), r.id as string]),
         );
@@ -106,6 +113,7 @@ export function ProjectImportShell() {
             seenInFile.add(key);
           }
           const { panels, fittings } = cabinetToParts(root);
+          const priced = importBomRows([...panels, ...fittings], components);
           return {
             root,
             code,
@@ -113,11 +121,13 @@ export function ProjectImportShell() {
             productId,
             action: status === "new" ? "create" : "skip",
             selected: status === "new" && AUTO_TICK.has(root.item_type),
-            panelCount: panels.length,
-            fittingCount: fittings.length,
+            panelCount: priced.panelCount,
+            fittingCount: priced.rows.length - priced.panelCount,
+            unlinkedCount: priced.unlinked.length,
           };
         });
 
+        setComponents(components);
         setParsed(json);
         setFilename(file.name);
         setRows(newRows);
@@ -196,7 +206,8 @@ export function ProjectImportShell() {
       setProgress(`${importedCount + 1} / ${selected.length}`);
 
       const dims = rootDims(root);
-      const { panels } = cabinetToParts(root);
+      const { panels, fittings } = cabinetToParts(root);
+      const parts = [...panels, ...fittings];
 
       if (row.action === "update" || row.action === "add_size") {
         if (!row.productId) {
@@ -206,7 +217,7 @@ export function ProjectImportShell() {
         }
         const meta = { source_filename: parsed.model, export_version: parsed.version ?? null };
         const fn = row.action === "update" ? updateCatalogueEntry : addStandardSize;
-        const err = await fn(supabase, row.productId, root, panels, meta);
+        const err = await fn(supabase, row.productId, root, parts, components, meta);
         if (err) {
           setImporting(false);
           setImportError(err);
@@ -214,7 +225,7 @@ export function ProjectImportShell() {
         }
         if (row.action === "update") updated++;
         else sizes++;
-        totalPanels += panels.length;
+        totalPanels += row.panelCount;
         importedCount++;
         continue;
       }
@@ -246,10 +257,11 @@ export function ProjectImportShell() {
         return;
       }
 
-      if (panels.length > 0) {
+      const { rows: bomRows } = importBomRows(parts, components);
+      if (bomRows.length > 0) {
         const { error: e2 } = await supabase.rpc("replace_bom_lines", {
           p_product_id: prod.id,
-          p_lines: panelsToBomRows(panels),
+          p_lines: bomRows,
         });
         if (e2) {
           await supabase.from("products").delete().eq("id", prod.id);
@@ -258,7 +270,7 @@ export function ProjectImportShell() {
           return;
         }
 
-        totalPanels += panels.length;
+        totalPanels += row.panelCount;
       }
 
       created++;
@@ -497,6 +509,11 @@ export function ProjectImportShell() {
                         </td>
                         <td className="px-3 py-2 text-center tabular-nums text-slate">
                           {row.fittingCount}
+                          {row.unlinkedCount > 0 && (
+                            <span className="text-rust text-xs ms-1">
+                              ({row.unlinkedCount} {t("notLinkedShort")})
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );

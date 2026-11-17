@@ -36,6 +36,9 @@ function ComponentRow({
           </div>
         )}
       </td>
+      <td className="px-4 py-3 font-mono text-xs" dir="ltr">
+        {c.code ?? "—"}
+      </td>
       <td className="px-4 py-3 text-slate tabular-nums text-sm" dir="ltr">
         {c.sku ?? "—"}
       </td>
@@ -107,6 +110,7 @@ function ComponentTable({
           <thead>
             <tr className="border-b border-line bg-mist">
               <th className="text-start px-4 py-3 font-medium">{t("nameEn")}</th>
+              <th className="text-start px-4 py-3 font-medium">{t("code")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("sku")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("unit")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("unitPrice")}</th>
@@ -152,7 +156,8 @@ export function ComponentsShell({
         (c) =>
           c.name_en.toLowerCase().includes(q) ||
           (c.name_ar ?? "").toLowerCase().includes(q) ||
-          (c.sku ?? "").toLowerCase().includes(q)
+          (c.sku ?? "").toLowerCase().includes(q) ||
+          (c.code ?? "").toLowerCase().includes(q)
       );
     }
     return list;

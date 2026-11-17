@@ -1,4 +1,5 @@
 import type { Cut, ToolingItem } from "@/lib/sketchup/types";
+import { isFittingByName } from "@/lib/sketchup/fittingKeywords";
 
 export const PART_ROLES = [
   "side_left",
@@ -334,13 +335,7 @@ function buildBoxesFromOrientedPanels(
     const axes = p.axes!;
     // Dimension panels from outline_mm (local-frame extents); fittings use world size_mm fallback.
     // axis-name → local index: width→0 (=bw/col0), depth→1 (=bh/col1), height→2 (=bd/col2)
-    const _isFitting = (() => {
-      const n = (p.part_name || "").toLowerCase();
-      return n.includes("p2o") || n.includes("leg") || n.includes("atira") ||
-             n.includes("hafele") || n.includes("basket") || n.includes("l_channel") ||
-             n.includes("u_channel") || n.includes("channel") || n.includes("blum") ||
-             n.includes("hinge") || n.includes("slide");
-    })();
+    const _isFitting = isFittingByName(p.part_name);
     let bw = m(p.su_width_mm);
     let bh = m(p.su_height_mm);
     let bd = m(p.su_depth_mm);

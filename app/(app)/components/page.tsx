@@ -31,7 +31,7 @@ export default async function ComponentsPage() {
   const { data: components } = await supabase
     .from("products")
     .select(
-      "id, sku, name_en, name_ar, subcategory, unit, unit_price_jod, cost_jod, track_stock, stock_qty, reorder_level, width_mm, height_mm, depth_mm, description, drive_url, is_active"
+      "id, sku, code, name_en, name_ar, subcategory, unit, unit_price_jod, cost_jod, track_stock, stock_qty, reorder_level, width_mm, height_mm, depth_mm, description, drive_url, is_active"
     )
     .eq("item_kind", "component")
     .eq("is_active", true)

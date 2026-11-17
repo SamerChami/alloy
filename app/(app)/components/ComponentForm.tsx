@@ -14,6 +14,7 @@ const UNITS = ["pcs", "sheet", "m", "m2", "set", "kg", "roll", "other"] as const
 
 type FormState = {
   sku: string;
+  code: string;
   name_en: string;
   name_ar: string;
   subcategory: string;
@@ -37,6 +38,7 @@ type FormState = {
 function fromComponent(c: Component | null): FormState {
   return {
     sku: c?.sku ?? "",
+    code: c?.code ?? "",
     name_en: c?.name_en ?? "",
     name_ar: c?.name_ar ?? "",
     subcategory: c?.subcategory ?? componentSubcategories[0].value,
@@ -101,6 +103,7 @@ export function ComponentForm({
     const supabase = createClient();
     const payload: Record<string, unknown> = {
       sku: form.sku.trim() || null,
+      code: form.code.trim() || null,
       name_en: form.name_en.trim(),
       name_ar: form.name_ar.trim() || null,
       subcategory: form.subcategory,
@@ -121,17 +124,20 @@ export function ComponentForm({
       sheet_price_jod: isMaterial && form.sheet_price_jod !== "" ? parseFloat(form.sheet_price_jod) : null,
     };
 
+    const friendly = (msg: string) =>
+      msg.includes("products_code_unique") ? t("codeExists") : msg;
+
     if (component?.id) {
       const { error: err } = await supabase
         .from("products")
         .update(payload)
         .eq("id", component.id);
-      if (err) { setSaving(false); setError(err.message); return; }
+      if (err) { setSaving(false); setError(friendly(err.message)); return; }
     } else {
       const { error: err } = await supabase
         .from("products")
         .insert({ ...payload, item_kind: "component" });
-      if (err) { setSaving(false); setError(err.message); return; }
+      if (err) { setSaving(false); setError(friendly(err.message)); return; }
     }
 
     setSaving(false);
@@ -196,12 +202,20 @@ export function ComponentForm({
             </div>
           </div>
 
-          {/* SKU / Subcategory / Unit */}
-          <div className="grid grid-cols-3 gap-4">
+          {/* SKU / Code */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">{t("sku")}</label>
               <input className="input" dir="ltr" value={form.sku} onChange={set("sku")} />
             </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">{t("code")}</label>
+              <input className="input font-mono" dir="ltr" value={form.code} onChange={set("code")} title={t("componentCodeHint")} />
+            </div>
+          </div>
+
+          {/* Subcategory / Unit */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">{t("subcategory")} *</label>
               <select className="input" required value={form.subcategory} onChange={set("subcategory")}>

@@ -3,6 +3,7 @@
 // v4 adds per-leaf `cuts[]` and optional `cut_warning`; top-level `total_parts` and `version`.
 
 import type { Cut, ToolingItem } from "./types";
+import { isFittingByName } from "./fittingKeywords";
 export type { Cut, ToolingItem };
 
 // ── Schema validation ────────────────────────────────────────────────────────
@@ -108,15 +109,9 @@ export type V3Part = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const FITTING_KEYWORDS = [
-  "p2o", "leg_", "atira", "hafele", "basket",
-  "l_channel", "u_channel", "channel", "blum", "hinge", "slide",
-];
-
-export function isFittingByName(name: string): boolean {
-  const n = name.toLowerCase();
-  return FITTING_KEYWORDS.some((kw) => n.includes(kw));
-}
+// The keyword list lives in ./fittingKeywords (one list for parser, viewer and
+// pricing; kept identical to the SketchUp extension by a test).
+export { isFittingByName };
 
 /** Recursively collect all leaf nodes under a given node. */
 export function collectLeaves(node: V3Node): V3Node[] {
