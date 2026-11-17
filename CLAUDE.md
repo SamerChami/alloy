@@ -31,6 +31,10 @@ and fix any errors before telling him it's done.
   production_manager, analyzing_manager, factory_worker, installation`.
   "Office" = admin + the 4 managers. RLS is already enforced in the database;
   still respect role visibility in the UI (see `lib/nav.ts`).
+  Money (prices, costs, labor, markup, pricing settings) is readable by
+  office roles only; pages for factory_worker / installation read products
+  from the view `products_basic`, which has no money columns — never query
+  the `products` table on a non-office path.
 - **Data access**: server components use `lib/supabase-server.ts`; client
   components use `lib/supabase-browser.ts`. Prefer Server Components for reads;
   use a small client component for interactive bits (forms, search).

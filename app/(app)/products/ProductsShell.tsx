@@ -11,13 +11,15 @@ import type { TKey } from "@/lib/i18n";
 import type { PricingSettings } from "@/lib/pricing";
 import { ProductForm } from "./ProductForm";
 import { PricingSettingsCard } from "./PricingSettingsCard";
-import type { Product } from "./types";
+import type { Product, ProductBasic } from "./types";
 import type { PanelOption, ComponentOption, BandingType } from "./bom_types";
+
+type ListProduct = Product | ProductBasic;
 
 const OTHER: SubcategoryConfig = { value: "Other", en: "Other", ar: "أخرى" };
 const ALL_GROUPS = [...productSubcategories, OTHER];
 
-function dims(p: Product): string | null {
+function dims(p: ListProduct): string | null {
   if (!p.width_mm && !p.height_mm && !p.depth_mm) return null;
   return (
     [p.width_mm, p.height_mm, p.depth_mm].map((v) => v ?? "—").join("×") + " mm"
@@ -29,9 +31,9 @@ function ProductRow({
   isOffice,
   onEdit,
 }: {
-  p: Product;
+  p: ListProduct;
   isOffice: boolean;
-  onEdit: (p: Product) => void;
+  onEdit: (p: ListProduct) => void;
 }) {
   const { t } = useLang();
   const d = dims(p);
@@ -54,9 +56,11 @@ function ProductRow({
       <td className="px-4 py-3 text-slate text-sm">
         {t((`unit_${p.unit}`) as TKey)}
       </td>
-      <td className="px-4 py-3 tabular-nums font-medium text-sm" dir="ltr">
-        {jod(p.unit_price_jod)}
-      </td>
+      {isOffice && (
+        <td className="px-4 py-3 tabular-nums font-medium text-sm" dir="ltr">
+          {jod((p as Product).unit_price_jod)}
+        </td>
+      )}
       <td className="px-4 py-3 text-slate text-sm tabular-nums" dir="ltr">
         {d ?? "—"}
       </td>
@@ -93,9 +97,9 @@ function ProductTable({
   isOffice,
   onEdit,
 }: {
-  products: Product[];
+  products: ListProduct[];
   isOffice: boolean;
-  onEdit: (p: Product) => void;
+  onEdit: (p: ListProduct) => void;
 }) {
   const { t } = useLang();
   return (
@@ -108,7 +112,9 @@ function ProductTable({
               <th className="text-start px-4 py-3 font-medium">{t("code")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("sku")}</th>
               <th className="text-start px-4 py-3 font-medium">{t("unit")}</th>
-              <th className="text-start px-4 py-3 font-medium">{t("unitPrice")}</th>
+              {isOffice && (
+                <th className="text-start px-4 py-3 font-medium">{t("unitPrice")}</th>
+              )}
               <th className="text-start px-4 py-3 font-medium">{t("dimensions")}</th>
               <th className="px-4 py-3" />
               {isOffice && <th className="px-4 py-3" />}
@@ -133,7 +139,7 @@ export function ProductsShell({
   bandingTypes,
   pricingSettings,
 }: {
-  initialProducts: Product[];
+  initialProducts: ListProduct[];
   isOffice: boolean;
   panels: PanelOption[];
   allComponents: ComponentOption[];
@@ -171,7 +177,7 @@ export function ProductsShell({
 
   const grouped = useMemo(() => {
     if (isFiltering) return null;
-    const map = new Map<string, Product[]>();
+    const map = new Map<string, ListProduct[]>();
     for (const sub of ALL_GROUPS) map.set(sub.value, []);
     const known = new Set(productSubcategories.map((s) => s.value));
     for (const p of filtered) {
@@ -186,8 +192,9 @@ export function ProductsShell({
     setFormOpen(true);
   }
 
-  function openEdit(p: Product) {
-    setEditTarget(p);
+  function openEdit(p: ListProduct) {
+    // Safe: the edit button is office-only, and office rows are full Product rows.
+    setEditTarget(p as Product);
     setFormOpen(true);
   }
 

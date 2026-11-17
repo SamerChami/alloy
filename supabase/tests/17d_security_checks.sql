@@ -103,6 +103,8 @@ end $$;
 
 -- ===== T6: does an ACTIVE factory worker still see what they need? =========
 -- Before and after: products > 0 (if the catalogue has products).
+-- After Stage 18d: products 0 (money tables are office-only). The factory
+-- worker's list is checked by M2 in 18d_money_checks.sql instead.
 do $$
 declare uid uuid; p int; b int;
 begin

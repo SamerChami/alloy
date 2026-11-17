@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase-server";
 import { ProductsShell } from "./ProductsShell";
-import type { Product } from "./types";
+import type { Product, ProductBasic } from "./types";
 import { DEFAULT_PRICING_SETTINGS, type PricingSettings } from "@/lib/pricing";
 import type { PanelOption, ComponentOption, BandingType } from "./bom_types";
 
@@ -19,9 +19,41 @@ export default async function ProductsPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user?.id ?? "")
+    .single();
+
+  const isOffice = OFFICE_ROLES.includes(profile?.role ?? "");
+
+  // Not office (factory / installation): read the price-free view only.
+  // No query on products, banding_types or pricing_settings on this path.
+  if (!isOffice) {
+    const { data: basic } = await supabase
+      .from("products_basic")
+      .select(
+        "id, sku, code, name_en, name_ar, subcategory, unit, width_mm, height_mm, depth_mm, description, drive_url, is_active"
+      )
+      .eq("item_kind", "product")
+      .eq("is_active", true)
+      .order("subcategory")
+      .order("name_en");
+
+    return (
+      <ProductsShell
+        initialProducts={(basic ?? []) as ProductBasic[]}
+        isOffice={false}
+        panels={[]}
+        allComponents={[]}
+        bandingTypes={[]}
+        pricingSettings={DEFAULT_PRICING_SETTINGS}
+      />
+    );
+  }
+
   const [
     { data: products },
-    { data: profile },
     { data: panels },
     { data: allComponents },
     { data: bandingTypes },
@@ -36,11 +68,6 @@ export default async function ProductsPage() {
       .eq("is_active", true)
       .order("subcategory")
       .order("name_en"),
-    supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user?.id ?? "")
-      .single(),
     // Panels = components with sheet dimensions set (available after db/05_bom.sql)
     supabase
       .from("products")
@@ -72,12 +99,10 @@ export default async function ProductsPage() {
       }
     : DEFAULT_PRICING_SETTINGS;
 
-  const isOffice = OFFICE_ROLES.includes(profile?.role ?? "");
-
   return (
     <ProductsShell
       initialProducts={(products ?? []) as Product[]}
-      isOffice={isOffice}
+      isOffice={true}
       panels={(panels ?? []) as PanelOption[]}
       allComponents={(allComponents ?? []) as ComponentOption[]}
       bandingTypes={(bandingTypes ?? []) as BandingType[]}

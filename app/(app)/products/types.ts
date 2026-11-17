@@ -25,3 +25,12 @@ export type Product = {
   default_panel_id?: string | null;
   calc_price_jod?: number | null;
 };
+
+/** What factory / installation users receive (view `products_basic`,
+ *  Stage 18d): no price, cost, labor or markup fields exist on it. */
+export type ProductBasic = Pick<
+  Product,
+  | "id" | "sku" | "code" | "name_en" | "name_ar" | "subcategory" | "unit"
+  | "width_mm" | "height_mm" | "depth_mm" | "description" | "drive_url"
+  | "is_active"
+>;
