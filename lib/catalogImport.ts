@@ -6,6 +6,7 @@ import {
   type ComponentBomRow, type ComponentRef, type PricedSplit,
   componentMap, mergeOldComponentLines, splitForPricing,
 } from "@/lib/fittings";
+import { type MeshDict, saveProductGeometry } from "@/lib/geometry";
 
 /** A board-panel bom_lines row as sent to replace_bom_lines (product_id / size_id are set by the RPC). */
 export type PanelBomRow = {
@@ -48,6 +49,9 @@ export type OldLine = {
 export type ImportMeta = {
   source_filename: string;
   export_version: string | null;
+  /** The export's schema string and its meshes dict, for the saved 3D geometry. */
+  export_schema?: string | null;
+  meshes?: MeshDict;
 };
 
 export function panelToBomRow(part: V3Part, sortOrder: number): PanelBomRow {
@@ -152,11 +156,19 @@ async function loadOldBaseLines(supabase: SupabaseClient, productId: string): Pr
 
 /** What an import into an existing catalogue entry did. `error` is null on
  *  success; the two counts are the lines actually saved (component lines
- *  include hardware added by hand that was kept). */
-export type ImportOutcome = { error: string | null; panelLines: number; componentLines: number };
+ *  include hardware added by hand that was kept). The 3D geometry is saved
+ *  after the parts: if only that step fails, `error` stays null and
+ *  `geometryError` says why (re-importing retries it). */
+export type ImportOutcome = {
+  error: string | null;
+  panelLines: number;
+  componentLines: number;
+  /** Set when the parts were saved but the 3D geometry was not (re-import to retry). */
+  geometryError: string | null;
+};
 
 function failed(message: string): ImportOutcome {
-  return { error: message, panelLines: 0, componentLines: 0 };
+  return { error: message, panelLines: 0, componentLines: 0, geometryError: null };
 }
 
 /** 1. Update catalogue entry: the model's reference geometry is replaced. */
@@ -189,9 +201,9 @@ export async function updateCatalogueEntry(
       p_product_id: productId,
       p_lines: rows,
     });
-    return e2
-      ? failed(e2.message)
-      : { error: null, panelLines: panelCount, componentLines: rows.length - panelCount };
+    if (e2) return failed(e2.message);
+    const geometryError = await saveProductGeometry(supabase, productId, null, parts, meta.meshes, meta);
+    return { error: null, panelLines: panelCount, componentLines: rows.length - panelCount, geometryError };
   } catch (e) {
     return failed(e instanceof Error ? e.message : String(e));
   }
@@ -248,9 +260,9 @@ export async function addStandardSize(
       p_lines: rows,
       p_size_id: sizeId,
     });
-    return e2
-      ? failed(e2.message)
-      : { error: null, panelLines: panelCount, componentLines: rows.length - panelCount };
+    if (e2) return failed(e2.message);
+    const geometryError = await saveProductGeometry(supabase, productId, sizeId, parts, meta.meshes, meta);
+    return { error: null, panelLines: panelCount, componentLines: rows.length - panelCount, geometryError };
   } catch (e) {
     return failed(e instanceof Error ? e.message : String(e));
   }

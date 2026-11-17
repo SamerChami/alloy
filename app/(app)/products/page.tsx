@@ -68,7 +68,7 @@ export default async function ProductsPage({
     supabase
       .from("products")
       .select(
-        "id, sku, code, default_panel_id, calc_price_jod, name_en, name_ar, subcategory, unit, unit_price_jod, cost_jod, width_mm, height_mm, depth_mm, description, drive_url, is_active, labor_jod, margin_pct, price_overridden, is_template, materials_cost_jod, components_cost_jod, base_cost_jod"
+        "id, sku, code, default_panel_id, calc_price_jod, name_en, name_ar, subcategory, unit, unit_price_jod, cost_jod, width_mm, height_mm, depth_mm, description, drive_url, is_active, source, labor_jod, margin_pct, price_overridden, is_template, materials_cost_jod, components_cost_jod, base_cost_jod"
       )
       .eq("item_kind", "product")
       .eq("is_active", !showInactive)

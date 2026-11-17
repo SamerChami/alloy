@@ -20,6 +20,7 @@ import { StandardSizes } from "./StandardSizes";
 import type { BomLineState, PanelOption, ComponentOption, BandingType, Cut } from "./bom_types";
 import type { Product } from "./types";
 import type { RawPanel3D } from "@/lib/cabinet3d";
+import { loadProductGeometry, type StoredGeometry } from "@/lib/geometry";
 
 const Cabinet3D = dynamic(
   () => import("@/components/Cabinet3D").then(m => ({ default: m.Cabinet3D })),
@@ -154,6 +155,8 @@ export function ProductForm({
   const [codeError, setCodeError] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [geometry, setGeometry] = useState<StoredGeometry | null>(null);
+  const [geometryLoaded, setGeometryLoaded] = useState(false);
 
   // Load BOM lines for existing product
   useEffect(() => {
@@ -171,6 +174,20 @@ export function ProductForm({
         setBomLines(lines);
         setLoadingBom(false);
       });
+  }, [product?.id]);
+
+  // Saved 3D geometry of an imported model (Stage 19a)
+  useEffect(() => {
+    let cancelled = false;
+    setGeometry(null);
+    if (!product?.id) { setGeometryLoaded(true); return; }
+    setGeometryLoaded(false);
+    loadProductGeometry(createClient(), product.id).then((g) => {
+      if (cancelled) return;
+      setGeometry(g);
+      setGeometryLoaded(true);
+    });
+    return () => { cancelled = true; };
   }, [product?.id]);
 
   // Compute rollup live from BOM lines + labor + margin
@@ -481,14 +498,33 @@ export function ProductForm({
           {product?.id && <StandardSizes productId={product.id} />}
 
           {/* ── 3D preview ── */}
-          {bomLines.some(l => l.line_type === "panel") && (
+          {geometry ? (
             <Cabinet3D
               cabinetWidth={parseFloat(form.width_mm)  || 0}
               cabinetHeight={parseFloat(form.height_mm) || 0}
               cabinetDepth={parseFloat(form.depth_mm)  || 0}
-              parts={bomLines}
-              rawPanels={rawPanels3D}
+              parts={[]}
+              skuPanels={geometry.skuPanels}
+              meshes={geometry.meshes}
             />
+          ) : product?.source === "sketchup_json" ? (
+            geometryLoaded ? (
+              <div className="border border-line rounded-lg p-4 text-sm text-slate">
+                {t("geometryReimportNote")}
+              </div>
+            ) : (
+              <div className="h-[400px] border border-line rounded-lg" />
+            )
+          ) : (
+            bomLines.some(l => l.line_type === "panel") && (
+              <Cabinet3D
+                cabinetWidth={parseFloat(form.width_mm)  || 0}
+                cabinetHeight={parseFloat(form.height_mm) || 0}
+                cabinetDepth={parseFloat(form.depth_mm)  || 0}
+                parts={bomLines}
+                rawPanels={rawPanels3D}
+              />
+            )
           )}
 
           {/* ── Pricing rollup ── */}

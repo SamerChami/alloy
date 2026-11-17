@@ -7,6 +7,7 @@ import { Upload, AlertTriangle, ChevronLeft, CheckCircle, Info } from "lucide-re
 import { useLang } from "@/components/lang-provider";
 import { createClient } from "@/lib/supabase-browser";
 import { inferRole } from "@/lib/cabinet3d";
+import { partsToSkuPanels, saveProductGeometry } from "@/lib/geometry";
 import { codeFromName, codeKey } from "@/lib/productCode";
 import {
   importBomRows,
@@ -15,7 +16,6 @@ import {
   addStandardSize,
 } from "@/lib/catalogImport";
 import { classifyPart, type ComponentRef } from "@/lib/fittings";
-import type { SkuPanel3D } from "@/lib/cabinet3d";
 import {
   type V3Json,
   type V3Part,
@@ -45,7 +45,7 @@ export function SingleImportShell() {
   const [importing, setImporting]     = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<
-    { name: string; panels: number; message?: string } | null
+    { name: string; panels: number; message?: string; geometryFailed?: boolean } | null
   >(null);
   const [existingCodes, setExistingCodes] = useState<Map<string, string>>(new Map());
   const [components, setComponents]   = useState<Map<string, ComponentRef>>(new Map());
@@ -125,7 +125,12 @@ export function SingleImportShell() {
     setImporting(true);
     setImportError(null);
     const root = parsed.roots[0];
-    const meta = { source_filename: parsed.model, export_version: parsed.version ?? null };
+    const meta = {
+      source_filename: parsed.model,
+      export_version: parsed.version ?? null,
+      export_schema: parsed.schema,
+      meshes: parsed.meshes,
+    };
     const fn = action === "update" ? updateCatalogueEntry : addStandardSize;
     const out = await fn(createClient(), existingId, root, [...panels, ...fittings], components, meta);
     setImporting(false);
@@ -133,6 +138,7 @@ export function SingleImportShell() {
     setImportResult({
       name: cabinetName.trim() || root.name,
       panels: priced.panelCount,
+      geometryFailed: out.geometryError != null,
       message:
         t(action === "update" ? "importUpdatedOk" : "importSizeAddedOk") +
         " " +
@@ -195,25 +201,21 @@ export function SingleImportShell() {
       }
     }
 
+    const gErr = await saveProductGeometry(
+      supabase, prod.id, null, [...panels, ...fittings], parsed.meshes,
+      { source_filename: parsed.model, export_version: parsed.version ?? null, export_schema: parsed.schema },
+    );
+
     setImporting(false);
-    setImportResult({ name: cabinetName.trim() || root.name, panels: priced.panelCount });
+    setImportResult({
+      name: cabinetName.trim() || root.name,
+      panels: priced.panelCount,
+      geometryFailed: gErr != null,
+    });
   }
 
   // Build SkuPanel3D for ALL leaves (panels + fittings) for accurate 3D
-  const allLeaves: SkuPanel3D[] = [...panels, ...fittings].map((part) => ({
-    part_role: inferRole(part.name),
-    part_name: part.name,
-    su_width_mm:  part.size.x,
-    su_height_mm: part.size.y,
-    su_depth_mm:  part.size.z,
-    pos: part.pos,
-    cuts: part.cuts,
-    axes: part.axes,
-    outline_mm: part.outline_mm,
-    profile_mm: part.profile_mm,
-    mesh_ref: part.mesh_ref,
-    tooling_mm: part.tooling,
-  }));
+  const allLeaves = partsToSkuPanels([...panels, ...fittings]);
 
   const dims = parsed ? rootDims(parsed.roots[0]) : null;
 
@@ -259,12 +261,17 @@ export function SingleImportShell() {
       {importResult && (
         <div className="border border-sage/40 bg-sage/10 rounded-lg p-4 flex items-center gap-3">
           <CheckCircle size={16} className="text-sage shrink-0" />
-          <p className="text-sm text-sage font-medium">
-            {importResult.message ??
-              t("skuImportSingleSuccess")
-                .replace("{name}", importResult.name)
-                .replace("{panels}", String(importResult.panels))}
-          </p>
+          <div className="text-sm font-medium">
+            <p className="text-sage">
+              {importResult.message ??
+                t("skuImportSingleSuccess")
+                  .replace("{name}", importResult.name)
+                  .replace("{panels}", String(importResult.panels))}
+            </p>
+            {importResult.geometryFailed && (
+              <p className="text-rust">{t("geometryNotSaved")}</p>
+            )}
+          </div>
           <button
             type="button"
             className="ms-auto btn-ghost text-sm"

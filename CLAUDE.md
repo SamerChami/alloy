@@ -54,6 +54,12 @@ Fittings: lib/sketchup/fittingKeywords.ts is the only fitting keyword list
 (kept identical to FITTING_KEYS in the SketchUp extension by a test). On
 import a drawn part is linked to a component by code (lib/fittings.ts);
 never add a second keyword list.
+3D of a saved product: the geometry is stored on import
+(product_geometry + geometry_meshes, via save_product_geometry /
+get_product_geometry) and drawn through lib/geometry.ts
+leavesToSkuPanels — the same mapping the import preview uses. Never
+build SkuPanel3D anywhere else, and never draw a SketchUp import from
+bom_lines positions.
 
 ## Workflow stages (the projects.stage enum, in order)
 lead → design → client_review → production_prep → analyzing → panel_saw →

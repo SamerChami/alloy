@@ -14,6 +14,8 @@ export type Product = {
   description: string | null;
   drive_url: string | null;
   is_active: boolean;
+  /** How the product was made, e.g. "sketchup_json" (office path only). */
+  source?: string | null;
   // BOM pricing fields (added by db/05_bom.sql)
   labor_jod?: number;
   margin_pct?: number;

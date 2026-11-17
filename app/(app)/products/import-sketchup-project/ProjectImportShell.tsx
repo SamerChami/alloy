@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { Upload, AlertTriangle, ChevronLeft, CheckCircle } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { createClient } from "@/lib/supabase-browser";
-import { inferRole } from "@/lib/cabinet3d";
+import { partsToSkuPanels, saveProductGeometry } from "@/lib/geometry";
 import { codeFromName, codeKey } from "@/lib/productCode";
 import {
   importBomRows,
@@ -58,7 +58,7 @@ export function ProjectImportShell() {
   const [importError, setImportError] = useState<string | null>(null);
   const [progress, setProgress]       = useState("");
   const [importResult, setImportResult] = useState<
-    { created: number; updated: number; sizes: number; panels: number } | null
+    { created: number; updated: number; sizes: number; panels: number; geometryFailed: number } | null
   >(null);
 
   const handleFile = useCallback(
@@ -200,6 +200,7 @@ export function ProjectImportShell() {
     let created = 0;
     let updated = 0;
     let sizes = 0;
+    let geometryFailed = 0;
 
     for (const row of selected) {
       const { root } = row;
@@ -215,7 +216,12 @@ export function ProjectImportShell() {
           setImportError("Product not found");
           return;
         }
-        const meta = { source_filename: parsed.model, export_version: parsed.version ?? null };
+        const meta = {
+          source_filename: parsed.model,
+          export_version: parsed.version ?? null,
+          export_schema: parsed.schema,
+          meshes: parsed.meshes,
+        };
         const fn = row.action === "update" ? updateCatalogueEntry : addStandardSize;
         const out = await fn(supabase, row.productId, root, parts, components, meta);
         if (out.error) {
@@ -223,6 +229,7 @@ export function ProjectImportShell() {
           setImportError(out.error);
           return;
         }
+        if (out.geometryError) geometryFailed++;
         if (row.action === "update") updated++;
         else sizes++;
         totalPanels += out.panelLines;
@@ -273,13 +280,19 @@ export function ProjectImportShell() {
         totalPanels += row.panelCount;
       }
 
+      const gErr = await saveProductGeometry(
+        supabase, prod.id, null, parts, parsed.meshes,
+        { source_filename: parsed.model, export_version: parsed.version ?? null, export_schema: parsed.schema },
+      );
+      if (gErr) geometryFailed++;
+
       created++;
       importedCount++;
     }
 
     setImporting(false);
     setProgress("");
-    setImportResult({ created, updated, sizes, panels: totalPanels });
+    setImportResult({ created, updated, sizes, panels: totalPanels, geometryFailed });
   }
 
   const selectedCount = rows.filter((r) => r.selected).length;
@@ -293,20 +306,7 @@ export function ProjectImportShell() {
   const previewPanels3D: SkuPanel3D[] | undefined = previewRoot
     ? (() => {
         const { panels, fittings } = cabinetToParts(previewRoot);
-        return [...panels, ...fittings].map((part) => ({
-          part_role: inferRole(part.name),
-          part_name: part.name,
-          su_width_mm:  part.size.x,
-          su_height_mm: part.size.y,
-          su_depth_mm:  part.size.z,
-          pos: part.pos,
-          cuts: part.cuts,
-          axes: part.axes,
-          outline_mm: part.outline_mm,
-          profile_mm: part.profile_mm,
-          mesh_ref: part.mesh_ref,
-          tooling_mm: part.tooling,
-        }));
+        return partsToSkuPanels([...panels, ...fittings]);
       })()
     : undefined;
 
@@ -367,6 +367,11 @@ export function ProjectImportShell() {
             )}
             {importResult.sizes > 0 && (
               <p>{t("importAddSize")}: {importResult.sizes}</p>
+            )}
+            {importResult.geometryFailed > 0 && (
+              <p className="text-rust">
+                {t("geometryNotSavedCount").replace("{n}", String(importResult.geometryFailed))}
+              </p>
             )}
           </div>
           <button
