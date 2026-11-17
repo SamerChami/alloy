@@ -151,7 +151,7 @@ export function CataloguePicker({
                   chosen?.id === p.id ? "bg-mist" : ""
                 }`}
               >
-                <span className="w-28 shrink-0 font-medium whitespace-nowrap" dir="ltr">{p.code ?? ""}</span>
+                <span className="w-36 shrink-0 font-medium truncate" title={p.code ?? ""} dir="ltr">{p.code ?? ""}</span>
                 <span className="flex-1 min-w-0 truncate" title={nameOf(p)}>{nameOf(p)}</span>
                 <span className="text-xs text-slate shrink-0" dir="ltr">
                   {dimsLabel(p.width_mm, p.height_mm, p.depth_mm)}

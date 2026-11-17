@@ -83,7 +83,7 @@ export function ManualLineForm({
             <label className="block text-sm font-medium mb-1">{t("quoteDescription")} *</label>
             <input className="input" required value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">{t("code")}</label>
               <input className="input" dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
