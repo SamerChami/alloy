@@ -7,7 +7,7 @@ import { useLang } from "@/components/lang-provider";
 import { PageTitle } from "@/components/ui/blocks";
 import { jod } from "@/lib/utils";
 import type { TKey } from "@/lib/i18n";
-import { isPastValidity, type QuoteStatus } from "@/lib/quotations";
+import { isPastValidity, todayInAmman, type QuoteStatus } from "@/lib/quotations";
 import { NewQuotationForm } from "./NewQuotationForm";
 import { StatusBadge } from "./StatusBadge";
 
@@ -40,7 +40,7 @@ export function QuotationsShell({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<QuoteStatus | "all">("all");
   const [formOpen, setFormOpen] = useState(presetClientId != null);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInAmman();
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

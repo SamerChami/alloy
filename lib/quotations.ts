@@ -85,6 +85,22 @@ export function isDraft(status: QuoteStatus): boolean {
 }
 
 /**
+ * Today's date in Amman as YYYY-MM-DD. ALLOY works on the Amman calendar;
+ * `new Date().toISOString()` is the UTC date, which is still yesterday between
+ * midnight and 03:00 in Amman (20b tester finding). The database dates new
+ * quotations the same way (migration 20261118100000).
+ */
+export function todayInAmman(now: Date = new Date()): string {
+  // en-CA formats as YYYY-MM-DD
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Amman",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+/**
  * A draft or sent quotation whose validity date has passed. `today` and
  * `validUntil` are YYYY-MM-DD strings (they compare correctly as text).
  */

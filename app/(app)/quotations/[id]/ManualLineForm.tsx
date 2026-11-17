@@ -39,6 +39,7 @@ export function ManualLineForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     const q = Number(qty);
     const p = Number(price);
     if (!description.trim() || !Number.isFinite(q) || q <= 0 || price.trim() === "" || !Number.isFinite(p) || p < 0) return;
@@ -77,6 +78,7 @@ export function ManualLineForm({
           </button>
         </div>
         <form onSubmit={submit} className="p-5 space-y-4">
+          <fieldset disabled={busy} className="contents">
           <div>
             <label className="block text-sm font-medium mb-1">{t("quoteDescription")} *</label>
             <input className="input" required value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -88,7 +90,7 @@ export function ManualLineForm({
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">{t("quoteSection")}</label>
-              <input className="input" list="manual-sections" value={section} onChange={(e) => setSection(e.target.value)} />
+              <input className="input" list="manual-sections" placeholder={t("quoteSectionHint")} value={section} onChange={(e) => setSection(e.target.value)} />
               <datalist id="manual-sections">
                 {sections.map((s) => (
                   <option key={s} value={s} />
@@ -159,6 +161,7 @@ export function ManualLineForm({
               {busy ? "…" : t("add")}
             </button>
           </div>
+          </fieldset>
         </form>
       </div>
     </div>

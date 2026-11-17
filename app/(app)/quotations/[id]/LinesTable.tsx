@@ -101,7 +101,7 @@ export function LinesTable({
     if (await onUpdate(l.id, patch)) setEdit(null);
   }
 
-  const th = "text-start px-3 py-2 font-medium";
+  const th = "text-start px-3 py-2 font-medium whitespace-nowrap";
 
   return (
     <div className="overflow-x-auto">
@@ -110,13 +110,13 @@ export function LinesTable({
           <option key={s} value={s} />
         ))}
       </datalist>
-      <table className="w-full text-sm">
+      <table className="w-full min-w-[900px] text-sm">
         <thead>
           <tr className="border-b border-line bg-mist">
             <th className={th}>#</th>
             <th className={th}>{t("code")}</th>
             <th className={th}>{t("quoteDescription")}</th>
-            <th className={th}>{t("quoteSize")}</th>
+            <th className={th}>{t("quoteSizeShort")}</th>
             <th className={th}>{t("qty")}</th>
             <th className={th}>{t("unitPrice")}</th>
             <th className={`${th} text-end`}>{t("quoteLineTotal")}</th>
@@ -164,7 +164,7 @@ export function LinesTable({
                           <input
                             className="input"
                             list="line-sections"
-                            placeholder={t("quoteSection")}
+                            placeholder={t("quoteSectionHint")}
                             value={edit.section}
                             onChange={(e) => setEdit({ ...edit, section: e.target.value })}
                           />
@@ -214,10 +214,10 @@ export function LinesTable({
                         dimsLabel(l.width_mm, l.height_mm, l.depth_mm)
                       )}
                     </td>
-                    <td className="px-3 py-2 tabular-nums" dir="ltr">
+                    <td className="px-3 py-2 tabular-nums whitespace-nowrap" dir="ltr">
                       {draft ? (
                         <input
-                          className="input w-20"
+                          className="input w-24 px-2 tabular-nums"
                           type="number"
                           min="0.01"
                           step="0.01"
@@ -231,10 +231,10 @@ export function LinesTable({
                         Number(l.qty)
                       )}
                     </td>
-                    <td className="px-3 py-2 tabular-nums" dir="ltr">
+                    <td className="px-3 py-2 tabular-nums whitespace-nowrap" dir="ltr">
                       {draft ? (
                         <input
-                          className="input w-28"
+                          className="input w-32 px-2 tabular-nums"
                           type="number"
                           min="0"
                           step="0.001"
@@ -269,7 +269,7 @@ export function LinesTable({
                           </div>
                         ) : (
                           <div className="flex gap-1">
-                            <button className="btn-ghost p-2" onClick={() => startEdit(l)} aria-label={t("quoteDescription")}>
+                            <button className="btn-ghost p-2" onClick={() => startEdit(l)} aria-label={t("quoteEditLine")} title={t("quoteEditLine")}>
                               <Pencil size={15} />
                             </button>
                             <button
@@ -277,6 +277,7 @@ export function LinesTable({
                               disabled={busy}
                               onClick={() => onRemove(l.id)}
                               aria-label={t("removeLine")}
+                              title={t("removeLine")}
                             >
                               <Trash2 size={15} />
                             </button>

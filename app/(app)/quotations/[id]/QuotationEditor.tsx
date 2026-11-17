@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Copy, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, Plus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase-browser";
 import { useLang } from "@/components/lang-provider";
 import type { TKey } from "@/lib/i18n";
@@ -14,6 +14,7 @@ import {
   isPastValidity,
   nextStatuses,
   sectionNames,
+  todayInAmman,
   type QuoteStatus,
   type QuotationItemRow,
   type QuotationRow,
@@ -54,10 +55,19 @@ export function QuotationEditor({
   const [pending, setPending] = useState<Pending>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const supabase = createClient();
 
+  useEffect(
+    () => () => {
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+    },
+    [],
+  );
+
   const draft = isDraft(quotation.status);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInAmman();
 
   /** Read the quotation and its lines again: what the database says is what we show. */
   async function reload() {
@@ -82,6 +92,11 @@ export function QuotationEditor({
     if (err) setError(err.message);
     await reload();
     setBusy(false);
+    if (!err) {
+      setSaved(true);
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSaved(false), 2000);
+    }
     return !err;
   }
 
@@ -145,6 +160,12 @@ export function QuotationEditor({
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-semibold" dir="ltr">{quotation.code}</h1>
               <StatusBadge status={quotation.status} />
+              {saved && (
+                <span className="inline-flex items-center gap-1 text-sage text-xs">
+                  <Check size={13} />
+                  {t("quoteSaved")}
+                </span>
+              )}
               {quotation.client && (
                 <Link href={`/clients/${quotation.client.id}`} className="text-sm text-slate hover:text-brass transition-colors">
                   {quotation.client.full_name}

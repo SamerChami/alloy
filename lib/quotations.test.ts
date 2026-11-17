@@ -8,6 +8,7 @@ import {
   nextStatuses,
   priceChanged,
   sectionNames,
+  todayInAmman,
 } from "./quotations";
 
 describe("status flow (mirror of trigger quotations_before_write)", () => {
@@ -37,6 +38,18 @@ describe("validity", () => {
   it("never flags a decided quotation or one with no date", () => {
     expect(isPastValidity("approved", "2026-12-18", "2027-01-01")).toBe(false);
     expect(isPastValidity("sent", null, "2027-01-01")).toBe(false);
+  });
+});
+
+describe("todayInAmman", () => {
+  it("is the Amman calendar date, not the UTC one", () => {
+    // 22:45 UTC on 17 Nov = 01:45 on 18 Nov in Amman (UTC+3)
+    expect(todayInAmman(new Date("2026-11-17T22:45:00Z"))).toBe("2026-11-18");
+    expect(todayInAmman(new Date("2026-11-17T20:59:00Z"))).toBe("2026-11-17");
+    expect(todayInAmman(new Date("2026-11-17T21:00:00Z"))).toBe("2026-11-18");
+  });
+  it("has the YYYY-MM-DD shape", () => {
+    expect(todayInAmman()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });
 

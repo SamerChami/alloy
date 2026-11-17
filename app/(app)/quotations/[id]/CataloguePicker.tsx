@@ -82,6 +82,7 @@ export function CataloguePicker({
   }
 
   async function add() {
+    if (busy) return;
     if (!chosen) return;
     const n = Number(qty);
     if (!Number.isFinite(n) || n <= 0) return;
@@ -166,6 +167,7 @@ export function CataloguePicker({
           </div>
 
           {chosen && (
+            <fieldset disabled={busy} className="contents">
             <div className="rounded-lg bg-mist p-4 space-y-3">
               <p className="text-sm font-medium">
                 <span dir="ltr">{chosen.code}</span> — {nameOf(chosen)}
@@ -205,6 +207,7 @@ export function CataloguePicker({
                   <input
                     className="input"
                     list="picker-sections"
+                    placeholder={t("quoteSectionHint")}
                     value={section}
                     onChange={(e) => setSection(e.target.value)}
                   />
@@ -223,6 +226,7 @@ export function CataloguePicker({
                 </button>
               </div>
             </div>
+            </fieldset>
           )}
         </div>
       </div>

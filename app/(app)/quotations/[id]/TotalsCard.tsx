@@ -132,6 +132,12 @@ export function TotalsCard({
           <dt className="text-slate">{t("quoteDiscount")}</dt>
           <dd className="tabular-nums" dir="ltr">− {jod(shown.discount)}</dd>
         </div>
+        {draft &&
+          !dirty &&
+          quotation.discount_kind === "amount" &&
+          Number(quotation.discount_value) > Number(quotation.subtotal_jod) && (
+            <p className="text-rust text-xs">{t("quoteDiscountCapped")}</p>
+          )}
 
         <div className="flex justify-between items-center gap-3">
           <dt className="text-slate">{t("quoteTax")}</dt>
@@ -182,7 +188,6 @@ export function TotalsCard({
             </option>
           ))}
         </select>
-        <p className="text-xs text-slate mt-1">{t("quotePriceDisplayHint")}</p>
       </div>
 
       <div className="bg-mist rounded-lg p-3 text-xs space-y-1">
