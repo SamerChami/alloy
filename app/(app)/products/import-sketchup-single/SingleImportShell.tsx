@@ -325,9 +325,19 @@ export function SingleImportShell() {
               </span>
               <span>
                 <span className="text-slate text-xs me-1">{t("skuFittings")}:</span>
-                <strong className="text-slate">{priced.rows.length - priced.panelCount}</strong>
+                <strong className="text-slate">{priced.rows.length - priced.panelCount}</strong>{" "}
+                <span className="text-xs text-slate">
+                  ({t("fittingPartsCount").replace("{n}", String(panels.length + fittings.length - priced.panelCount))})
+                </span>
               </span>
             </div>
+            {parsed.mesh_report && parsed.mesh_report.corrected_meshes > 0 && (
+              <p className="text-xs text-slate">
+                {t("exportFixedFaces")
+                  .replace("{parts}", String(parsed.mesh_report.corrected_meshes))
+                  .replace("{faces}", String(parsed.mesh_report.flipped_triangles))}
+              </p>
+            )}
             {priced.unlinked.length > 0 && (
               <div className="border border-rust/30 bg-rust/5 rounded-lg p-4 flex gap-3">
                 <AlertTriangle size={16} className="text-rust shrink-0 mt-0.5" />

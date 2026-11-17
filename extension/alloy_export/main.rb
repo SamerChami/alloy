@@ -1,4 +1,12 @@
-# main.rb — ALLOY Export v0.6.12
+# main.rb — ALLOY Export v0.6.13
+# v0.6.13 = mesh orientation: every triangle of a closed solid now points
+#           outward (reversed SketchUp faces are corrected in the export;
+#           open / non-manifold meshes are left as they are). mesh_hash keeps
+#           each triangle's facing (it used to sort the corners, so a part and
+#           a reversed-face copy shared one mesh_ref). New top-level
+#           "mesh_report". Removed the ALLOY_DIAG groups diagnostic and the
+#           internal _loop_pts field that leaked into tooling. Schema
+#           unchanged (alloy.sketchup.v6.6): no field changed meaning.
 # v0.6.12 = mesh_ref for COMPLEX panel leaves (gate: face_count==6, axis-aligned,
 #           no inner loops, 6 distinct normals → PLAIN; else COMPLEX). Plain leaves
 #           unchanged. Fittings unchanged. Schema alloy.sketchup.v6.6.
@@ -25,7 +33,7 @@ require "digest"
 
 module Alloy
   module Export
-    VERSION = "0.6.12"
+    VERSION = "0.6.13"
     SCHEMA  = "alloy.sketchup.v6.6"
     MM      = 25.4   # inches → mm
 
@@ -40,7 +48,6 @@ module Alloy
     EDGE_TOL     = 1.0   # mm — used in detect_cuts rabbet/groove classification
     ROUND_TOL    = 0.08  # normalised residual threshold for circle vs polygon classification
     GROOVE_ASPECT = 4.0  # floor-face aspect ratio ≥ this → linear groove/dado → cuts[]; < this → pocket → tooling[]
-    ALLOY_DIAG    = false  # 15a groups diagnostic — off for the 15b parity build
 
     def self.mm(v); (v * MM).round(1); end
 
@@ -474,147 +481,6 @@ module Alloy
       [sx, sy, sz]
     end
 
-    # ── Diagnostic dump (gated on ALLOY_DIAG) ────────────────────────────────
-
-    def self.diag_leaf(e, world_tr, lines)
-      is_grp   = e.is_a?(Sketchup::Group)
-      kind_str = is_grp ? "Group" : "ComponentInstance"
-      nm       = name_of(e)
-      respond_note = is_grp ? "  (respond_to?(:local_bounds)=#{e.respond_to?(:local_bounds)})" : ""
-
-      lines << ""
-      lines << "===== LEAF: #{nm}  [#{kind_str}]#{respond_note} ====="
-
-      # 3. Local bounds
-      lb   = local_bounds(e)
-      lmin = lb.min
-      lines << "local_bounds.min  = (#{lmin.x.round(4)}, #{lmin.y.round(4)}, #{lmin.z.round(4)}) in" \
-               "   ext = (#{mm(lb.width).round(3)}, #{mm(lb.height).round(3)}, #{mm(lb.depth).round(3)}) mm"
-
-      eb   = e.bounds
-      emin = eb.min
-      lines << "e.bounds.min      = (#{emin.x.round(4)}, #{emin.y.round(4)}, #{emin.z.round(4)}) in" \
-               "   ext = (#{mm(eb.width).round(3)}, #{mm(eb.height).round(3)}, #{mm(eb.depth).round(3)}) mm"
-
-      if e.is_a?(Sketchup::ComponentInstance)
-        db   = e.definition.bounds
-        dmin = db.min
-        lines << "defn.bounds.min   = (#{dmin.x.round(4)}, #{dmin.y.round(4)}, #{dmin.z.round(4)}) in" \
-                 "   ext = (#{mm(db.width).round(3)}, #{mm(db.height).round(3)}, #{mm(db.depth).round(3)}) mm"
-      else
-        lines << "defn.bounds.ext   = (n/a — group)"
-      end
-
-      # 4. Transform to_a (column-major)
-      t  = e.transformation
-      m  = t.to_a
-      mf = m.map { |v| v.round(6) }
-      lines << "xform.to_a        = [#{mf.join(', ')}]   (column-major)"
-
-      # 5. Derived basis axes (xaxis/yaxis/zaxis as returned by SU API)
-      xa = t.xaxis; ya = t.yaxis; za = t.zaxis
-      lines << "xaxis=(#{xa.x.round(6)}, #{xa.y.round(6)}, #{xa.z.round(6)})  len=#{xa.length.round(6)}"
-      lines << "yaxis=(#{ya.x.round(6)}, #{ya.y.round(6)}, #{ya.z.round(6)})  len=#{ya.length.round(6)}"
-      lines << "zaxis=(#{za.x.round(6)}, #{za.y.round(6)}, #{za.z.round(6)})  len=#{za.length.round(6)}"
-
-      # 6. Column-magnitude scale (instance_scales formula; computed for ALL leaves)
-      csx = Math.sqrt(m[0]**2 + m[1]**2 + m[2]**2)
-      csy = Math.sqrt(m[4]**2 + m[5]**2 + m[6]**2)
-      csz = Math.sqrt(m[8]**2 + m[9]**2 + m[10]**2)
-      star_note = is_grp ? "   (* computed for diagnosis; not applied to groups today)" : ""
-      lines << "instance_scales*  = (#{csx.round(6)}, #{csy.round(6)}, #{csz.round(6)})#{star_note}"
-
-      # 7. Determinant of 3×3 [xaxis|yaxis|zaxis] basis
-      cx  = ya.y * za.z - ya.z * za.y
-      cy  = ya.z * za.x - ya.x * za.z
-      cz  = ya.x * za.y - ya.y * za.x
-      det = xa.x * cx + xa.y * cy + xa.z * cz
-      det_str = "#{det >= 0 ? '+' : ''}#{det.round(6)}"
-      lines << "det(basis)        = #{det_str}"
-
-      # 8 & 9. World AABB (transform 8 local-bounds corners by accumulated world_tr)
-      corners = (0..7).map { |i| world_tr * lb.corner(i) rescue nil }.compact
-      if corners.length == 8
-        wxs = corners.map(&:x); wys = corners.map(&:y); wzs = corners.map(&:z)
-        wex = mm(wxs.max - wxs.min).round(3)
-        wey = mm(wys.max - wys.min).round(3)
-        wez = mm(wzs.max - wzs.min).round(3)
-        lines << "world.aabb.ext    = (#{wex}, #{wey}, #{wez}) mm  [X,Y,Z]"
-        thinnest = [["X", wex], ["Y", wey], ["Z", wez]].min_by { |_, v| v }.first
-        lines << "world.thinnest    = #{thinnest}"
-      else
-        lines << "world.aabb.ext    = (n/a — corner transform failed)"
-        lines << "world.thinnest    = n/a"
-      end
-
-      # 10. Face reachability — can existing face-projection logic reach group faces?
-      ents = entities_of(e)
-      if ents
-        all_faces = ents.select { |f| f.is_a?(Sketchup::Face) }
-        fc = all_faces.length
-        bw = lb.width; bh = lb.height; bd = lb.depth
-        if bw > 0.001 && bh > 0.001 && bd > 0.001
-          exts  = { x: bw, y: bh, z: bd }
-          t_sym, _ = exts.min_by { |_, v| v }
-          t_vec = case t_sym
-            when :x then Geom::Vector3d.new(1, 0, 0)
-            when :y then Geom::Vector3d.new(0, 1, 0)
-            when :z then Geom::Vector3d.new(0, 0, 1)
-          end
-          t_min_val = coord(lb.min, t_sym)
-          t_max_val = t_min_val + exts[t_sym]
-          tol = 0.01
-          thick_found = all_faces.any? do |f|
-            next false if f.normal.dot(t_vec).abs < (1.0 - tol)
-            tv = coord(f.vertices.first.position, t_sym) rescue nil
-            next false unless tv
-            (tv - t_min_val).abs <= tol || (tv - t_max_val).abs <= tol
-          end
-          lines << "faces=#{fc}  thickness_face_found=#{thick_found}"
-        else
-          lines << "faces=#{fc}  thickness_face_found=n/a (degenerate bounds)"
-        end
-      else
-        lines << "faces=n/a  thickness_face_found=n/a (entities_of returned nil)"
-      end
-
-      lines << "=" * 62
-    rescue => ex
-      lines << "[DIAG ERROR in leaf #{name_of(e) rescue '?'}: #{ex.class}: #{ex.message}]"
-      lines << "=" * 62
-    end
-
-    def self.diag_walk(e, parent_tr, lines)
-      tr   = parent_tr * e.transformation
-      kids = child_instances(e)
-      if kids.empty?
-        diag_leaf(e, tr, lines)
-      else
-        kids.each { |k| diag_walk(k, tr, lines) }
-      end
-    rescue => ex
-      lines << "[DIAG ERROR walking #{name_of(e) rescue '?'}: #{ex.class}: #{ex.message}]"
-    end
-
-    def self.run_diag(roots, identity, save_path)
-      lines = [
-        "ALLOY Groups Diagnostic  [v#{VERSION}]",
-        "Model: #{Sketchup.active_model.path rescue '?'}",
-        "Run:   #{Time.now}",
-        "=" * 62
-      ]
-      roots.each { |r| diag_walk(r, identity, lines) }
-      txt       = lines.join("\n") + "\n"
-      diag_path = File.join(File.dirname(save_path), "groups_diag.txt")
-      File.write(diag_path, txt)
-      puts "[ALLOY_DIAG] Written to: #{diag_path}"
-      puts txt
-      diag_path
-    rescue => ex
-      puts "[ALLOY_DIAG run error: #{ex.class}: #{ex.message}]"
-      nil
-    end
-
     def self.leaf_is_plain?(e)
       ents = entities_of(e)
       return true unless ents
@@ -641,7 +507,7 @@ module Alloy
         geo = mesh_geometry(e, [sx, sy, sz])
         return nil if geo.nil?
         key = "mesh_" + mesh_hash(geo)
-        @mesh_cache[key] ||= geo
+        remember_mesh(key, geo)
         key
       end
     rescue
@@ -758,8 +624,7 @@ module Alloy
               diameter_mm: (2 * c[:r]).round(1),
               cu_mm:       c[:cu].round(1),
               cv_mm:       c[:cv].round(1),
-              face:        "both",
-              _loop_pts:   pts_clean.length
+              face:        "both"
             }
           else
             key = uv_pts.map { |p| [p[0].round, p[1].round] }.sort.first(3).inspect
@@ -862,6 +727,106 @@ module Alloy
     # (even with distinct #NN names from "Make Unique") share one cache entry.
     # All computation is in definition LOCAL space — instance-independent.
 
+    # ── Mesh orientation (v0.6.13) ────────────────────────────────────────────
+    # SketchUp draws both sides of a face, so a model can carry REVERSED faces
+    # (back side out) that nobody notices there. Exported as-is, their triangles
+    # point into the solid. orient_outward makes every triangle of a closed
+    # solid point outward:
+    #   1. weld vertices by position (each face brings its own copies);
+    #   2. walk across shared edges: two neighbours agree when they run along
+    #      their shared edge in OPPOSITE directions; a neighbour that disagrees
+    #      is flipped;
+    #   3. a connected piece that is now consistent AND closed (every edge used
+    #      by exactly two triangles) is turned inside-out as a whole if its
+    #      signed volume is negative.
+    # A piece that is open, non-manifold or cannot be made consistent is left
+    # exactly as it was (there is no "outside" to point at). Vertices are never
+    # changed, only the corner order of triangles.
+    # Returns [mesh, report]; report = { flipped:, pieces:, left_alone: }.
+    def self.orient_outward(mesh)
+      verts = mesh[:vertices]
+      tris  = mesh[:triangles].map { |t| t.dup }
+      report = { flipped: 0, pieces: 0, left_alone: 0 }
+
+      weld = {}
+      wid  = verts.map { |v| weld[v] ||= weld.length }
+      wt   = tris.map { |t| t.map { |i| wid[i] } }
+
+      edge_tris = Hash.new { |h, k| h[k] = [] }
+      live = []
+      wt.each_with_index do |t, ti|
+        next if t[0] == t[1] || t[1] == t[2] || t[2] == t[0]   # degenerate sliver
+        live << ti
+        3.times do |k|
+          a = t[k]; b = t[(k + 1) % 3]
+          edge_tris[a < b ? [a, b] : [b, a]] << ti
+        end
+      end
+
+      flip    = {}          # ti => true/false, relative to the triangle as exported
+      visited = {}
+      live.each do |seed|
+        next if visited[seed]
+        piece = []; ok = true; closed = true
+        visited[seed] = true; flip[seed] = false
+        queue = [seed]
+        until queue.empty?
+          ti = queue.shift
+          piece << ti
+          t = wt[ti]
+          3.times do |k|
+            a = t[k]; b = t[(k + 1) % 3]
+            users = edge_tris[a < b ? [a, b] : [b, a]]
+            if users.length != 2
+              closed = false
+              next
+            end
+            tj = users[0] == ti ? users[1] : users[0]
+            if tj == ti          # both uses belong to this same triangle
+              closed = false
+              next
+            end
+            u = wt[tj]
+            # does the neighbour run a->b too (same direction = it disagrees)?
+            same_dir = (0..2).any? { |m| u[m] == a && u[(m + 1) % 3] == b }
+            want = same_dir ? !flip[ti] : flip[ti]
+            if visited[tj]
+              ok = false if flip[tj] != want
+            else
+              visited[tj] = true
+              flip[tj] = want
+              queue << tj
+            end
+          end
+        end
+
+        report[:pieces] += 1
+        unless ok && closed
+          report[:left_alone] += 1
+          piece.each { |ti| flip[ti] = false }
+          next
+        end
+
+        vol = 0.0
+        piece.each do |ti|
+          i0, i1, i2 = tris[ti]
+          i1, i2 = i2, i1 if flip[ti]
+          a = verts[i0]; b = verts[i1]; c = verts[i2]
+          vol += a[0] * (b[1] * c[2] - b[2] * c[1]) -
+                 a[1] * (b[0] * c[2] - b[2] * c[0]) +
+                 a[2] * (b[0] * c[1] - b[1] * c[0])
+        end
+        piece.each { |ti| flip[ti] = !flip[ti] } if vol < 0
+      end
+
+      flip.each do |ti, f|
+        next unless f
+        tris[ti] = [tris[ti][0], tris[ti][2], tris[ti][1]]
+        report[:flipped] += 1
+      end
+      [{ vertices: verts, triangles: tris }, report]
+    end
+
     # Step 1: extract raw vertices+triangles from a definition.
     def self.mesh_geometry(defn, scales = nil)
       sc = scales || [1.0, 1.0, 1.0]
@@ -877,20 +842,39 @@ module Alloy
         base += pts.length
       end
       return nil if verts.empty? || tris.empty?
-      { vertices: verts, triangles: tris }
+      geo, @last_mesh_fix = orient_outward({ vertices: verts, triangles: tris })
+      geo
     end
 
-    # Step 2: canonical hash invariant to vertex order and triangle order.
-    # Sort vertices, remap triangle indices, sort triangles, MD5 the JSON.
+    # Step 2: canonical hash.
+    # Canonical hash: the same for the same geometry whatever order SketchUp
+    # lists vertices and triangles in, but DIFFERENT when a triangle faces the
+    # other way (up to v0.6.12 the corners of each triangle were sorted, which
+    # threw the facing away). Each triangle is rotated so its smallest corner
+    # comes first; its corner ORDER is kept.
     def self.mesh_hash(mesh)
       vlist = mesh[:vertices]
       order = (0...vlist.length).sort_by { |i| vlist[i] }
       remap = Array.new(vlist.length)
       order.each_with_index { |old_i, new_i| remap[old_i] = new_i }
       sorted_verts  = order.map { |i| vlist[i] }
-      remapped_tris = mesh[:triangles].map { |t| t.map { |i| remap[i] }.sort }
+      remapped_tris = mesh[:triangles].map { |t|
+        r = t.map { |i| remap[i] }
+        r.rotate(r.index(r.min))
+      }
       remapped_tris.sort!
       Digest::MD5.hexdigest([sorted_verts, remapped_tris].to_json)[0, 16]
+    end
+
+    # Keep a mesh once per export and note, once, what orient_outward did to it.
+    def self.remember_mesh(key, geo)
+      return if @mesh_cache.key?(key)
+      @mesh_cache[key] = geo
+      fix = @last_mesh_fix || { flipped: 0, pieces: 0, left_alone: 0 }
+      @mesh_report[:meshes]            += 1
+      @mesh_report[:corrected_meshes]  += 1 if fix[:flipped] > 0
+      @mesh_report[:flipped_triangles] += fix[:flipped]
+      @mesh_report[:not_closed_meshes] += 1 if fix[:left_alone] > 0
     end
 
     # Step 3: build geometry, key cache by "mesh_"+hash; identical geometry reuses.
@@ -899,7 +883,7 @@ module Alloy
       geo = mesh_geometry(defn, scales)
       return nil if geo.nil?
       key = "mesh_" + mesh_hash(geo)
-      @mesh_cache[key] ||= geo
+      remember_mesh(key, geo)
       key
     rescue
       nil
@@ -1039,6 +1023,7 @@ module Alloy
 
     def self.run
       @mesh_cache = {}   # reset per-export; prevents accumulation across runs
+      @mesh_report = { meshes: 0, corrected_meshes: 0, flipped_triangles: 0, not_closed_meshes: 0 }
       model = Sketchup.active_model
       sel   = model.selection
       roots =
@@ -1082,6 +1067,7 @@ module Alloy
         total_parts: total_parts,
         summary:     by_type,
         roots:       trees,
+        mesh_report: @mesh_report,
         meshes:      @mesh_cache
       }
 
@@ -1089,7 +1075,7 @@ module Alloy
       return unless path
       path += ".json" unless path.downcase.end_with?(".json")
       File.write(path, JSON.pretty_generate(payload))
-      run_diag(roots, identity, path) if defined?(ALLOY_DIAG) && ALLOY_DIAG
+      puts "[ALLOY v#{VERSION}] mesh_report: #{@mesh_report.inspect}"
       UI.messagebox("Exported #{trees.length} root item(s), #{total_parts} part(s).\n#{summary}\n\nSaved to:\n#{path}")
     end
 

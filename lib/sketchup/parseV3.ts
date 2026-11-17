@@ -68,6 +68,13 @@ export type V3Json = {
   roots: V3Node[];
   // v6: deduped geometry meshes keyed by content hash (fittings + complex panels from v6.6)
   meshes?: Record<string, { vertices: [number, number, number][]; triangles: [number, number, number][] }>;
+  // v0.6.13: what the exporter's face-orientation pass did
+  mesh_report?: {
+    meshes: number;
+    corrected_meshes: number;
+    flipped_triangles: number;
+    not_closed_meshes: number;
+  };
 };
 
 // ── Part type (output of cabinetToParts) ─────────────────────────────────────

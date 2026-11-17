@@ -181,3 +181,46 @@ export async function loadProductGeometry(
   if (!Array.isArray(stored.leaves) || stored.leaves.length === 0) return null;
   return { skuPanels: leavesToSkuPanels(stored.leaves), meshes: stored.meshes ?? {} };
 }
+
+/**
+ * Give a duplicated product the same 3D model as the one it was copied from.
+ * The stored leaves and meshes are passed on exactly as they are (the meshes
+ * are already keyed by content, so nothing new is stored for them).
+ * Returns an error message, or null on success — also null when the original
+ * has no stored geometry (nothing to copy).
+ */
+export async function copyProductGeometry(
+  supabase: SupabaseClient,
+  fromProductId: string,
+  toProductId: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.rpc("get_product_geometry", {
+      p_product_id: fromProductId,
+      p_size_id: null,
+    });
+    if (error) return error.message;
+    const stored = data as {
+      leaves?: GeometryLeaf[];
+      meshes?: MeshDict;
+      export_schema?: string | null;
+      export_version?: string | null;
+      source_filename?: string | null;
+    } | null;
+    if (!stored || !Array.isArray(stored.leaves) || stored.leaves.length === 0) return null;
+    const { error: e2 } = await supabase.rpc("save_product_geometry", {
+      p_product_id: toProductId,
+      p_size_id: null,
+      p_leaves: stored.leaves,
+      p_meshes: stored.meshes ?? {},
+      p_meta: {
+        source_filename: stored.source_filename ?? null,
+        export_version: stored.export_version ?? null,
+        export_schema: stored.export_schema ?? null,
+      },
+    });
+    return e2 ? e2.message : null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}

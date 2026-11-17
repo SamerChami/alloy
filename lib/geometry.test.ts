@@ -2,8 +2,10 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
 import { inferRole } from "./cabinet3d";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  contentAddress, leavesToSkuPanels, meshContentRef, meshesForLeaves, partsToLeaves, partsToSkuPanels,
+  contentAddress, copyProductGeometry, leavesToSkuPanels, meshContentRef, meshesForLeaves,
+  partsToLeaves, partsToSkuPanels,
 } from "./geometry";
 import { cabinetToParts, type V3Json } from "./sketchup/parseV3";
 
@@ -122,5 +124,47 @@ describe("content keys for stored meshes", () => {
     const out = await contentAddress(leaves, {});
     expect(out.leaves[0].mesh_ref).toBe("mesh_gone");
     expect(out.meshes).toEqual({});
+  });
+});
+
+describe("copyProductGeometry (Duplicate)", () => {
+  type Call = { fn: string; args: Record<string, unknown> };
+  function fakeClient(stored: unknown, saveError: string | null = null) {
+    const calls: Call[] = [];
+    const client = {
+      rpc: async (fn: string, args: Record<string, unknown>) => {
+        calls.push({ fn, args });
+        if (fn === "get_product_geometry") return { data: stored, error: null };
+        return { data: 0, error: saveError ? { message: saveError } : null };
+      },
+    } as unknown as SupabaseClient;
+    return { client, calls };
+  }
+  const stored = {
+    leaves: [{ name: "Leg", size_mm: { x: 1, y: 1, z: 1 }, pos_mm: { x: 0, y: 0, z: 0 }, mesh_ref: "mesh_abc" }],
+    meshes: { mesh_abc: { vertices: [[0, 0, 0]], triangles: [] } },
+    export_schema: "alloy.sketchup.v6.6", export_version: "0.6.12", source_filename: "a.skp",
+  };
+
+  it("saves the original's leaves and meshes, unchanged, under the copy", async () => {
+    const { client, calls } = fakeClient(stored);
+    expect(await copyProductGeometry(client, "from-id", "to-id")).toBeNull();
+    expect(calls.map((c) => c.fn)).toEqual(["get_product_geometry", "save_product_geometry"]);
+    expect(calls[0].args).toEqual({ p_product_id: "from-id", p_size_id: null });
+    expect(calls[1].args).toEqual({
+      p_product_id: "to-id", p_size_id: null, p_leaves: stored.leaves, p_meshes: stored.meshes,
+      p_meta: { source_filename: "a.skp", export_version: "0.6.12", export_schema: "alloy.sketchup.v6.6" },
+    });
+  });
+
+  it("does nothing, without error, when the original has no 3D model", async () => {
+    const { client, calls } = fakeClient(null);
+    expect(await copyProductGeometry(client, "from-id", "to-id")).toBeNull();
+    expect(calls.map((c) => c.fn)).toEqual(["get_product_geometry"]);
+  });
+
+  it("reports a failed save", async () => {
+    const { client } = fakeClient(stored, "boom");
+    expect(await copyProductGeometry(client, "from-id", "to-id")).toBe("boom");
   });
 });

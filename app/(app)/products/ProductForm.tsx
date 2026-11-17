@@ -20,7 +20,7 @@ import { StandardSizes } from "./StandardSizes";
 import type { BomLineState, PanelOption, ComponentOption, BandingType, Cut } from "./bom_types";
 import type { Product } from "./types";
 import type { RawPanel3D } from "@/lib/cabinet3d";
-import { loadProductGeometry, type StoredGeometry } from "@/lib/geometry";
+import { loadProductGeometry, copyProductGeometry, type StoredGeometry } from "@/lib/geometry";
 
 const Cabinet3D = dynamic(
   () => import("@/components/Cabinet3D").then(m => ({ default: m.Cabinet3D })),
@@ -398,6 +398,7 @@ export function ProductForm({
         code: null,
         item_kind: "product",
         is_template: true,
+        source: product.source ?? null,
       })
       .select("id")
       .single();
@@ -410,6 +411,9 @@ export function ProductForm({
 
     const bomErr = await saveBomLines(newProd.id);
     if (bomErr) { setDuplicating(false); setError(bomErr); return; }
+
+    const gErr = await copyProductGeometry(supabase, product.id, newProd.id);
+    if (gErr) { setDuplicating(false); setError(t("duplicateNoGeometry")); return; }
 
     setDuplicating(false);
     onSaved();
