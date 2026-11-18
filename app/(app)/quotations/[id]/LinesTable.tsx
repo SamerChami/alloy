@@ -13,7 +13,7 @@ import {
 } from "@/lib/quotations";
 
 /** Light rust over white, painted as an image so the sticky cell stays opaque. */
-const RUST_TINT_OPAQUE = "[background-image:linear-gradient(theme(colors.rust/10),theme(colors.rust/10))]";
+const RUST_TINT_OPAQUE = "[background-image:linear-gradient(rgb(166_73_46/0.1),rgb(166_73_46/0.1))]";
 
 type Typed ={ qty?: string; price?: string };
 
