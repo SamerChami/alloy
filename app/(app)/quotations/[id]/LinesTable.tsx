@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { jod } from "@/lib/utils";
@@ -12,7 +12,10 @@ import {
   type QuotationItemRow,
 } from "@/lib/quotations";
 
-type Typed = { qty?: string; price?: string };
+/** Light rust over white, painted as an image so the sticky cell stays opaque. */
+const RUST_TINT_OPAQUE = "[background-image:linear-gradient(theme(colors.rust/10),theme(colors.rust/10))]";
+
+type Typed ={ qty?: string; price?: string };
 
 type Edit = {
   id: string;
@@ -49,6 +52,17 @@ export function LinesTable({
   const [typed, setTyped] = useState<Record<string, Typed>>({});
   const [edit, setEdit] = useState<Edit | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const uid = useId();
+  const els = useRef<Record<string, HTMLElement | null>>({});
+  const focusNext = useRef<string | null>(null);
+
+  // Move focus after the render that makes the target exist.
+  useEffect(() => {
+    const key = focusNext.current;
+    if (!key) return;
+    focusNext.current = null;
+    els.current[key]?.focus({ preventScroll: true });
+  });
 
   const groups = groupBySection(lines);
   const names = sectionNames(lines);
@@ -74,6 +88,7 @@ export function LinesTable({
   }
 
   function startEdit(l: QuotationItemRow) {
+    focusNext.current = `desc:${l.id}`;
     setEdit({
       id: l.id,
       description: l.description,
@@ -99,8 +114,22 @@ export function LinesTable({
       patch.height_mm = whole(edit.h);
       patch.depth_mm = whole(edit.d);
     }
-    if (await onUpdate(l.id, patch)) setEdit(null);
+    if (await onUpdate(l.id, patch)) {
+      focusNext.current = `pencil:${l.id}`;
+      setEdit(null);
+    }
   }
+
+  function cancelEdit(id: string) {
+    focusNext.current = `pencil:${id}`;
+    setEdit(null);
+  }
+
+  /** Ref callback that records a focus target by key (e.g. "pencil:<line id>"). */
+  const reg = (key: string) => (el: HTMLElement | null) => {
+    els.current[key] = el;
+  };
+  const fid = (rowId: string, part: string) => `${uid}-${rowId}-${part}`;
 
   const th = "text-start px-2 py-2 font-medium whitespace-nowrap";
 
@@ -121,7 +150,11 @@ export function LinesTable({
             <th className={th}>{t("qty")}</th>
             <th className={th}>{t("unitPrice")}</th>
             <th className={`${th} text-end`}>{t("quoteLineTotal")}</th>
-            {draft && <th className="px-2 py-2 w-28 min-w-[7rem] sticky end-0 bg-mist border-s border-line" />}
+            {draft && (
+              <th className="px-2 py-2 w-28 min-w-[7rem] sticky end-0 bg-mist border-s border-line">
+                <span className="sr-only">{t("quoteActions")}</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -135,13 +168,14 @@ export function LinesTable({
               {g.lines.map((l) => {
                 running += 1;
                 const editing = draft && edit?.id === l.id;
+                const confirming = confirmId === l.id;
                 const manual = l.price_source === "manual";
                 const desc = lang === "ar" && l.description_ar ? l.description_ar : l.description;
                 const qtyText = typed[l.id]?.qty ?? String(Number(l.qty));
                 const priceText = typed[l.id]?.price ?? String(Number(l.unit_price_jod));
                 return (
                   <Fragment key={l.id}>
-                  <tr className="border-b border-line align-top">
+                  <tr className={`border-b border-line align-top ${confirming ? "bg-rust/10" : ""}`}>
                     <td className="px-2 py-2 text-slate tabular-nums" dir="ltr">{running}</td>
                     <td className="px-2 py-2 whitespace-nowrap" dir="ltr">{l.code ?? ""}</td>
                     <td className="px-2 py-2 min-w-[11rem]">
@@ -200,26 +234,30 @@ export function LinesTable({
                       {jod(l.line_total_jod)}
                     </td>
                     {draft && (
-                      <td className="px-2 py-2 w-28 min-w-[7rem] whitespace-nowrap sticky end-0 bg-paper border-s border-line">
+                      <td className={`px-2 py-2 w-28 min-w-[7rem] whitespace-nowrap sticky end-0 bg-paper border-s border-line ${confirming ? RUST_TINT_OPAQUE : ""}`}>
                         {!editing && (
                           <div className="flex gap-1">
-                            {confirmId === l.id ? (
+                            {confirming ? (
                               <div className="flex items-center gap-0.5 text-rust text-xs whitespace-nowrap">
                                 <button
-                                  className="btn-ghost p-1 text-rust"
+                                  className="btn-ghost p-1"
                                   disabled={busy}
                                   onClick={async () => {
                                     await onRemove(l.id);
                                     setConfirmId(null);
                                   }}
-                                  aria-label={t("removeLine")}
-                                  title={t("removeLine")}
+                                  aria-label={t("quoteRemoveConfirm")}
+                                  title={t("quoteRemoveConfirm")}
                                 >
-                                  <Check size={15} />
+                                  <Check size={15} className="text-rust" />
                                 </button>
                                 <button
+                                  ref={reg(`cancel:${l.id}`)}
                                   className="btn-ghost p-1"
-                                  onClick={() => setConfirmId(null)}
+                                  onClick={() => {
+                                    focusNext.current = `trash:${l.id}`;
+                                    setConfirmId(null);
+                                  }}
                                   aria-label={t("cancel")}
                                   title={t("cancel")}
                                 >
@@ -228,17 +266,27 @@ export function LinesTable({
                               </div>
                             ) : (
                               <>
-                                <button className="btn-ghost p-1.5" onClick={() => startEdit(l)} aria-label={t("quoteEditLine")} title={t("quoteEditLine")}>
+                                <button
+                                  ref={reg(`pencil:${l.id}`)}
+                                  className="btn-ghost p-1.5"
+                                  onClick={() => startEdit(l)}
+                                  aria-label={t("quoteEditLine")}
+                                  title={t("quoteEditLine")}
+                                >
                                   <Pencil size={15} />
                                 </button>
                                 <button
-                                  className="btn-ghost p-1.5 text-rust"
+                                  ref={reg(`trash:${l.id}`)}
+                                  className="btn-ghost p-1.5"
                                   disabled={busy}
-                                  onClick={() => setConfirmId(l.id)}
+                                  onClick={() => {
+                                    focusNext.current = `cancel:${l.id}`;
+                                    setConfirmId(l.id);
+                                  }}
                                   aria-label={t("removeLine")}
                                   title={t("removeLine")}
                                 >
-                                  <Trash2 size={15} />
+                                  <Trash2 size={15} className="text-rust" />
                                 </button>
                               </>
                             )}
@@ -257,20 +305,23 @@ export function LinesTable({
                             if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
                               e.preventDefault();
                               saveEdit(l);
-                            } else if (e.key === "Escape") setEdit(null);
+                            } else if (e.key === "Escape") cancelEdit(l.id);
                           }}
                         >
                           <div className="lg:col-span-2">
-                            <label className="block text-xs text-slate mb-1">{t("quoteDescription")}</label>
+                            <label htmlFor={fid(l.id, "desc")} className="block text-xs text-slate mb-1">{t("quoteDescription")}</label>
                             <input
+                              id={fid(l.id, "desc")}
+                              ref={reg(`desc:${l.id}`)}
                               className="input"
                               value={edit.description}
                               onChange={(e) => setEdit({ ...edit, description: e.target.value })}
                             />
                           </div>
                           <div className="lg:col-span-2">
-                            <label className="block text-xs text-slate mb-1">{t("quoteSection")}</label>
+                            <label htmlFor={fid(l.id, "section")} className="block text-xs text-slate mb-1">{t("quoteSection")}</label>
                             <input
+                              id={fid(l.id, "section")}
                               className="input"
                               list="line-sections"
                               placeholder={t("quoteSectionHint")}
@@ -278,51 +329,61 @@ export function LinesTable({
                               onChange={(e) => setEdit({ ...edit, section: e.target.value })}
                             />
                           </div>
-                          <div className="lg:col-span-2">
-                            <label className="block text-xs text-slate mb-1">{t("notes")}</label>
-                            <input
-                              className="input"
-                              value={edit.notes}
-                              onChange={(e) => setEdit({ ...edit, notes: e.target.value })}
-                            />
-                          </div>
                           {manual && (
                             <>
                               <div>
-                                <label className="block text-xs text-slate mb-1">{t("code")}</label>
+                                <label htmlFor={fid(l.id, "code")} className="block text-xs text-slate mb-1">{t("code")}</label>
                                 <input
+                                  id={fid(l.id, "code")}
                                   className="input"
                                   dir="ltr"
                                   value={edit.code}
                                   onChange={(e) => setEdit({ ...edit, code: e.target.value })}
                                 />
                               </div>
-                              <div className="grid grid-cols-3 gap-2">
-                                {(
-                                  [
-                                    ["w", edit.w, t("quoteWidth")],
-                                    ["h", edit.h, t("quoteHeight")],
-                                    ["d", edit.d, t("quoteDepth")],
-                                  ] as const
-                                ).map(([k, v, label]) => (
-                                  <div key={k}>
-                                    <label className="block text-xs text-slate mb-1">{label}</label>
-                                    <input
-                                      className="input"
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      dir="ltr"
-                                      value={v}
-                                      onChange={(e) => setEdit({ ...edit, [k]: e.target.value })}
-                                    />
-                                  </div>
-                                ))}
+                              <div className="lg:col-span-2" role="group" aria-labelledby={fid(l.id, "size")}>
+                                <span id={fid(l.id, "size")} className="block text-xs text-slate mb-1 whitespace-nowrap">
+                                  {t("quoteSizeShort")}
+                                </span>
+                                <div className="grid grid-cols-3 gap-2">
+                                  {(
+                                    [
+                                      ["w", edit.w, t("quoteWidthShort")],
+                                      ["h", edit.h, t("quoteHeightShort")],
+                                      ["d", edit.d, t("quoteDepthShort")],
+                                    ] as const
+                                  ).map(([k, v, label]) => (
+                                    <div key={k} className="min-w-0">
+                                      <label htmlFor={fid(l.id, k)} className="block text-xs text-slate mb-1 whitespace-nowrap">
+                                        {label}
+                                      </label>
+                                      <input
+                                        id={fid(l.id, k)}
+                                        className="input"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        dir="ltr"
+                                        value={v}
+                                        onChange={(e) => setEdit({ ...edit, [k]: e.target.value })}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             </>
                           )}
+                          <div className="lg:col-span-2 lg:col-start-1">
+                            <label htmlFor={fid(l.id, "notes")} className="block text-xs text-slate mb-1">{t("notes")}</label>
+                            <input
+                              id={fid(l.id, "notes")}
+                              className="input"
+                              value={edit.notes}
+                              onChange={(e) => setEdit({ ...edit, notes: e.target.value })}
+                            />
+                          </div>
                           <div className="flex justify-end gap-2 sm:col-span-2 lg:col-span-4">
-                            <button className="btn-ghost" onClick={() => setEdit(null)}>
+                            <button className="btn-ghost" onClick={() => cancelEdit(l.id)}>
                               {t("cancel")}
                             </button>
                             <button className="btn-primary" disabled={busy} onClick={() => saveEdit(l)}>
