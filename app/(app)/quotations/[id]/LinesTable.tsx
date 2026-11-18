@@ -105,7 +105,7 @@ export function LinesTable({
   const th = "text-start px-2 py-2 font-medium whitespace-nowrap";
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto [container-type:inline-size]">
       <datalist id="line-sections">
         {names.map((s) => (
           <option key={s} value={s} />
@@ -121,7 +121,7 @@ export function LinesTable({
             <th className={th}>{t("qty")}</th>
             <th className={th}>{t("unitPrice")}</th>
             <th className={`${th} text-end`}>{t("quoteLineTotal")}</th>
-            {draft && <th className="px-2 py-2 sticky end-0 bg-mist border-s border-line" />}
+            {draft && <th className="px-2 py-2 w-28 min-w-[7rem] sticky end-0 bg-mist border-s border-line" />}
           </tr>
         </thead>
         <tbody>
@@ -200,40 +200,47 @@ export function LinesTable({
                       {jod(l.line_total_jod)}
                     </td>
                     {draft && (
-                      <td className="px-2 py-2 whitespace-nowrap sticky end-0 bg-paper border-s border-line">
+                      <td className="px-2 py-2 w-28 min-w-[7rem] whitespace-nowrap sticky end-0 bg-paper border-s border-line">
                         {!editing && (
                           <div className="flex gap-1">
-                            <button className="btn-ghost p-1.5" onClick={() => startEdit(l)} aria-label={t("quoteEditLine")} title={t("quoteEditLine")}>
-                              <Pencil size={15} />
-                            </button>
                             {confirmId === l.id ? (
-                              <div className="flex items-center gap-1 text-rust text-xs">
-                                <span>{t("quoteRemoveConfirm")}</span>
+                              <div className="flex items-center gap-0.5 text-rust text-xs whitespace-nowrap">
                                 <button
-                                  className="btn-ghost p-1.5 text-rust"
+                                  className="btn-ghost p-1 text-rust"
                                   disabled={busy}
                                   onClick={async () => {
                                     await onRemove(l.id);
                                     setConfirmId(null);
                                   }}
                                   aria-label={t("removeLine")}
+                                  title={t("removeLine")}
                                 >
                                   <Check size={15} />
                                 </button>
-                                <button className="btn-ghost p-1.5" onClick={() => setConfirmId(null)} aria-label={t("cancel")}>
+                                <button
+                                  className="btn-ghost p-1"
+                                  onClick={() => setConfirmId(null)}
+                                  aria-label={t("cancel")}
+                                  title={t("cancel")}
+                                >
                                   <X size={15} />
                                 </button>
                               </div>
                             ) : (
-                              <button
-                                className="btn-ghost p-1.5 text-rust"
-                                disabled={busy}
-                                onClick={() => setConfirmId(l.id)}
-                                aria-label={t("removeLine")}
-                                title={t("removeLine")}
-                              >
-                                <Trash2 size={15} />
-                              </button>
+                              <>
+                                <button className="btn-ghost p-1.5" onClick={() => startEdit(l)} aria-label={t("quoteEditLine")} title={t("quoteEditLine")}>
+                                  <Pencil size={15} />
+                                </button>
+                                <button
+                                  className="btn-ghost p-1.5 text-rust"
+                                  disabled={busy}
+                                  onClick={() => setConfirmId(l.id)}
+                                  aria-label={t("removeLine")}
+                                  title={t("removeLine")}
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </>
                             )}
                           </div>
                         )}
@@ -243,6 +250,7 @@ export function LinesTable({
                   {editing && edit && (
                     <tr className="border-b border-line">
                       <td colSpan={8} className="bg-mist/60 px-3 py-3">
+                        <div className="sticky start-0 w-[calc(100cqw-1.5rem)] max-w-full">
                         <div
                           className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
                           onKeyDown={(e) => {
@@ -260,7 +268,7 @@ export function LinesTable({
                               onChange={(e) => setEdit({ ...edit, description: e.target.value })}
                             />
                           </div>
-                          <div>
+                          <div className="lg:col-span-2">
                             <label className="block text-xs text-slate mb-1">{t("quoteSection")}</label>
                             <input
                               className="input"
@@ -270,7 +278,7 @@ export function LinesTable({
                               onChange={(e) => setEdit({ ...edit, section: e.target.value })}
                             />
                           </div>
-                          <div>
+                          <div className="lg:col-span-2">
                             <label className="block text-xs text-slate mb-1">{t("notes")}</label>
                             <input
                               className="input"
@@ -321,6 +329,7 @@ export function LinesTable({
                               {t("save")}
                             </button>
                           </div>
+                        </div>
                         </div>
                       </td>
                     </tr>
