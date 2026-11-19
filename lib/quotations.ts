@@ -58,13 +58,14 @@ export type QuotationItemRow = {
   price_source: PriceSource;
   notes: string | null;
   sort_order: number;
+  price_warning: string | null;
 };
 
 /** Column lists for `.select(...)`, kept next to the types they fill. */
 export const QUOTATION_COLUMNS =
   "id, code, client_id, project_id, title, status, issue_date, valid_until, discount_kind, discount_value, discount_jod, tax_pct, subtotal_jod, tax_jod, total_jod, price_display, notes, root_id, revision, sent_at, decided_at, created_at";
 export const QUOTATION_ITEM_COLUMNS =
-  "id, quotation_id, product_id, size_id, section, item_no, code, description, description_ar, width_mm, height_mm, depth_mm, qty, unit_price_jod, line_total_jod, list_price_jod, unit_cost_jod, price_source, notes, sort_order";
+  "id, quotation_id, product_id, size_id, section, item_no, code, description, description_ar, width_mm, height_mm, depth_mm, qty, unit_price_jod, line_total_jod, list_price_jod, unit_cost_jod, price_source, notes, sort_order, price_warning";
 
 /** Same flow as trigger quotations_before_write. */
 const FLOW: Record<QuoteStatus, QuoteStatus[]> = {

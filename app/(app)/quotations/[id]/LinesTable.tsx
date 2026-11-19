@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useId, useRef, useState } from "react";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, Pencil, Trash2, X } from "lucide-react";
 import { useLang } from "@/components/lang-provider";
 import { jod } from "@/lib/utils";
 import {
@@ -177,9 +177,29 @@ export function LinesTable({
                   <Fragment key={l.id}>
                   <tr className={`border-b border-line align-top ${confirming ? "bg-rust/10" : ""}`}>
                     <td className="px-2 py-2 text-slate tabular-nums" dir="ltr">{running}</td>
-                    <td className="px-2 py-2 whitespace-nowrap" dir="ltr">{l.code ?? ""}</td>
+                    <td className="px-2 py-2 whitespace-nowrap">
+                      <div dir="ltr">{l.code ?? ""}</div>
+                      {l.price_source === "parts" && <div className="text-xs text-slate">{t("quoteFromParts")}</div>}
+                    </td>
                     <td className="px-2 py-2 min-w-[11rem]">
                       <div>{desc}</div>
+                      {l.price_warning && (
+                        <div className="text-xs text-rust flex items-start gap-1">
+                          <AlertTriangle size={13} aria-hidden className="mt-0.5 shrink-0" />
+                          <span dir="ltr">{l.price_warning}</span>
+                          {draft && (
+                            <button
+                              className="btn-ghost p-0.5"
+                              disabled={busy}
+                              onClick={() => onUpdate(l.id, { price_warning: null })}
+                              aria-label={t("quoteWarningDismiss")}
+                              title={t("quoteWarningDismiss")}
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {(l.item_no || l.notes) && (
                         <div className="text-xs text-slate">
                           {l.item_no && <span dir="ltr">{l.item_no}</span>}

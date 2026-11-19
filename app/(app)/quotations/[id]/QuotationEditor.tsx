@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, Copy, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, Plus, Trash2, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase-browser";
 import { useLang } from "@/components/lang-provider";
 import type { TKey } from "@/lib/i18n";
@@ -23,6 +23,7 @@ import { StatusBadge } from "../StatusBadge";
 import { CataloguePicker, type CatalogueItem, type CatalogueSize } from "./CataloguePicker";
 import { LinesTable } from "./LinesTable";
 import { ManualLineForm } from "./ManualLineForm";
+import { SketchUpImportDialog } from "./SketchUpImportDialog";
 import { TotalsCard } from "./TotalsCard";
 
 export type QuotationWithClient = QuotationRow & {
@@ -55,6 +56,7 @@ export function QuotationEditor({
   const [pending, setPending] = useState<Pending>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const supabase = createClient();
@@ -319,6 +321,10 @@ export function QuotationEditor({
               <Plus size={15} />
               {t("quoteAddManual")}
             </button>
+            <button className="btn-ghost flex items-center gap-2 text-sm" onClick={() => setImportOpen(true)}>
+              <Upload size={15} />
+              {t("quoteImportSketchUp")}
+            </button>
           </div>
         )}
       </div>
@@ -334,6 +340,15 @@ export function QuotationEditor({
           sections={sections}
           onClose={() => setPickerOpen(false)}
           onAdded={reload}
+        />
+      )}
+      {importOpen && draft && (
+        <SketchUpImportDialog
+          quotationId={quotation.id}
+          sections={sections}
+          lines={lines}
+          onClose={() => setImportOpen(false)}
+          onImported={reload}
         />
       )}
       {manualOpen && draft && (
